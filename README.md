@@ -148,7 +148,7 @@ python examples/clvad/run_continual_visual_ad.py \
 It combines 27 selected categories from all five source datasets into one continuous sequence,
 with dataset blocks ordered by difficulty (BTech → MPDD → DAGM → VisA → MVTec).
 
-Manifests are published on HuggingFace at [`anonmllab/inclad-md`](https://huggingface.co/datasets/anonmllab/inclad-md) and loaded automatically at runtime.
+Manifests are published on HuggingFace at [`anonmllab/inclad-bench`](https://huggingface.co/datasets/anonmllab/inclad-bench) and loaded automatically at runtime.
 
 Categories are selected as **2 easiest + 2 median + 2 hardest** per dataset (BTech uses all 3), based on STE ROC-AUC rankings:
 
