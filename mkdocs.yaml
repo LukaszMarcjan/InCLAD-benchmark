@@ -1,4 +1,4 @@
-site_name: pyCLAD -- Continual Lifelong Anomaly Detection
+site_name: InCLAD-Bench Documentation
 theme:
   name: material
   highlightjs: true

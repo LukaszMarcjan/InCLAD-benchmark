@@ -132,8 +132,6 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [[ -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
   PYTHON="$PROJECT_ROOT/.venv/bin/python"
-elif [[ -x "$HOME/.virtualenvs/pyCLAD/bin/python" ]]; then
-  PYTHON="$HOME/.virtualenvs/pyCLAD/bin/python"
 elif command -v python3 >/dev/null 2>&1; then
   PYTHON="$(command -v python3)"
 else
@@ -216,7 +214,7 @@ esac
 # Print summary and run
 # ---------------------------------------------------------------------------
 echo "════════════════════════════════════════════════════════════════════════"
-echo "  pyCLAD experiment runner"
+echo "  InCLAD-Bench experiment runner"
 echo "════════════════════════════════════════════════════════════════════════"
 echo "  Benchmark(s):  $BENCHMARKS_LIST"
 echo "  Models:        $MODELS"

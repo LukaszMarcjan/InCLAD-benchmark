@@ -1,10 +1,16 @@
 # InCLAD-Bench Dataset
 
+> **Anonymous review note:** author and maintainer metadata has been redacted
+> in this artifact for double-blind review. Required open-source license notices
+> are retained, and full attribution will be restored in the de-anonymized
+> public release.
+
 InCLAD-Bench is a continual learning benchmark for visual anomaly detection.
 It aggregates five widely-used industrial anomaly detection datasets into a
 unified evaluation protocol with reproducible category orderings.
 
-We leverage the pyCLAD library for continual scenario orchestration. The source code is available in the repository. Install it directly:
+The repository includes the underlying continual anomaly detection library used
+to orchestrate these scenarios. Install it directly:
 
 ```bash
 pip install -e .
@@ -12,7 +18,7 @@ pip install -e .
 
 #### Optional dependencies
 
-The core pyCLAD installation covers tabular and time-series anomaly detection.
+The core installation covers tabular and time-series anomaly detection.
 For visual models, install the vision stack separately:
 
 ```bash
@@ -21,7 +27,7 @@ pip install torch torchvision pytorch-lightning
 
 ### Getting started
 
-pyCLAD is built upon a few core concepts:
+The codebase is built upon a few core concepts:
 
 - **Scenario**: a continual scenario defines the data stream so that it reflects different real-life conditions and what
   are the challenges faced by continual strategy.
@@ -36,7 +42,9 @@ pyCLAD is built upon a few core concepts:
 
 ## Visual Anomaly Detection
 
-We implement visual anomaly detection methods in pyCLAD — image-based models, pixel-level metrics, continual learning strategies for vision, and ready-to-use visual benchmarks.
+The project implements visual anomaly detection methods — image-based models,
+pixel-level metrics, continual learning strategies for vision, and ready-to-use
+visual benchmarks.
 
 ### Supported models
 
@@ -56,7 +64,8 @@ CL variants (e.g. PatchCore-CL, PaDiM-CL) extend the base model with memory mana
 
 ### Strategies for visual anomaly detection
 
-Beyond the general-purpose strategies (Naive, Cumulative, Replay), pyCLAD provides:
+Beyond the general-purpose strategies (Naive, Cumulative, Replay), the project
+provides:
 
 | Strategy | Description |
 |----------|-------------|
@@ -182,6 +191,8 @@ dataset = InCLADMDDataset(
 # dataset is a ConceptsDataset — ready to pass to any pyCLAD scenario
 ```
 
-Roots can also be set via environment variables or the pyCLAD visual dataset registry — see the [InCLAD-Bench documentation](docs/inclad-bench-dataset.md) for details.
+Roots can also be set via environment variables or the local visual dataset
+registry — see the [InCLAD-Bench documentation](docs/inclad-bench-dataset.md)
+for details.
 
 **[Full InCLAD-MD documentation](docs/inclad-md-dataset.md)**

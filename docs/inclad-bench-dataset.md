@@ -1,5 +1,10 @@
 # InCLAD-Bench Dataset
 
+> **Anonymous review note:** author and maintainer metadata has been redacted
+> in this artifact for double-blind review. Required open-source license notices
+> are retained, and full attribution will be restored in the de-anonymized
+> public release.
+
 InCLAD-Bench is a continual learning benchmark for visual anomaly detection.
 It aggregates five widely-used industrial anomaly detection datasets into a
 unified evaluation protocol with reproducible category orderings.
@@ -11,7 +16,8 @@ The benchmark manifests are published on HuggingFace:
 > paths, labels, category orderings). **Image files are not included** and must be
 > downloaded separately from each dataset's original source. For each benchmark you
 > intend to use, download the images, extract the archive, and place the resulting
-> folder in a location pyCLAD can find — see [Setup: downloading images](#setup-downloading-images) below.
+> folder in a location the local dataset resolver can find — see
+> [Setup: downloading images](#setup-downloading-images) below.
 
 ---
 
@@ -199,13 +205,13 @@ for them.
 
 ---
 
-## Using InCLAD-Bench with pyCLAD
+## Using InCLAD-Bench with the local package
 
 ### Step 1 — Download and place the source images
 
 Download the archives from the links above, extract them, and place the resulting
 folders somewhere on your filesystem. The folder structure must match the layout
-described in each benchmark's section above — pyCLAD resolves image files using
+described in each benchmark's section above — the package resolves image files using
 the relative paths stored in the HuggingFace manifest.
 
 ### Step 2 — Register dataset locations
@@ -229,11 +235,11 @@ export PYCLAD_VISA_ROOT=/data/VisA
 
 **Option C — shared root with auto-detection:**
 
-pyCLAD looks for known subdirectory names inside `PYCLAD_VISUAL_DATASETS_ROOT`:
+The package looks for known subdirectory names inside `PYCLAD_VISUAL_DATASETS_ROOT`:
 
 ```bash
 export PYCLAD_VISUAL_DATASETS_ROOT=/data
-# pyCLAD will look for /data/mvtec_ad, /data/mvtec, /data/mvtec_anomaly_detection, etc.
+# The package will look for /data/mvtec_ad, /data/mvtec, /data/mvtec_anomaly_detection, etc.
 ```
 
 Recognised subdirectory names per benchmark:

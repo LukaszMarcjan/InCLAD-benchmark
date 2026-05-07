@@ -1,5 +1,10 @@
 # InCLAD-MD Dataset
 
+> **Anonymous review note:** author and maintainer metadata has been redacted
+> in this artifact for double-blind review. Required open-source license notices
+> are retained, and full attribution will be restored in the de-anonymized
+> public release.
+
 InCLAD-MD is a multi-dataset sequential benchmark for continual visual anomaly detection.
 It combines selected categories from all five InCLAD-Bench source datasets (BTech, DAGM,
 MPDD, MVTec AD, VisA) into a single curriculum sequence.
