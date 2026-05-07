@@ -1,10 +1,5 @@
 # InCLAD-Bench Dataset
 
-> **Anonymous review note:** author and maintainer metadata has been redacted
-> in this artifact for double-blind review. Required open-source license notices
-> are retained, and full attribution will be restored in the de-anonymized
-> public release.
-
 InCLAD-Bench is a continual learning benchmark for visual anomaly detection.
 It aggregates five widely-used industrial anomaly detection datasets into a
 unified evaluation protocol with reproducible category orderings.
