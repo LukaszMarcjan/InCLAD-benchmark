@@ -1,4 +1,11 @@
-# InCLAD-Bench Dataset
+# InCLAD: A Continual Learning Benchmark for Industrial Visual Anomaly Detection
+
+Code for the NeurIPS 2026 Evaluations & Datasets Track paper
+*InCLAD: A Continual Learning Benchmark for Industrial Visual Anomaly Detection*
+(Łukasz Marcjan, Dorota Wilk-Kołodziejczyk, Roberto Corizzo).
+
+- **Scenario manifests (Hugging Face):** [`lifelonglab/inclad-benchmark`](https://huggingface.co/datasets/lifelonglab/inclad-benchmark)
+- **Code:** this repository
 
 InCLAD-Bench is a continual learning benchmark for visual anomaly detection.
 It aggregates five widely-used industrial anomaly detection datasets into a
@@ -114,7 +121,7 @@ Pixel-level evaluation is handled by `VisualPixelConceptMetricCallback`, which r
 | VisA     | 12         | CC BY 4.0       |
 
 Each dataset is provided with three category orderings: `easy_to_hard`, `hard_to_easy`, and `random` (seeded for reproducibility).
-Benchmark manifests are published on HuggingFace at [`anonmllab/inclad-bench`](https://huggingface.co/datasets/anonmllab/inclad-bench) and downloaded automatically at runtime — only the raw image archives need to be downloaded manually.
+Benchmark manifests are published on HuggingFace at [`lifelonglab/inclad-benchmark`](https://huggingface.co/datasets/lifelonglab/inclad-benchmark) and downloaded automatically at runtime — only the raw image archives need to be downloaded manually.
 
 ### Quick start
 
@@ -152,7 +159,7 @@ python examples/clvad/run_continual_visual_ad.py \
 It combines 27 selected categories from all five source datasets into one continuous sequence,
 with dataset blocks ordered by difficulty (BTech → MPDD → DAGM → VisA → MVTec).
 
-Manifests are published on HuggingFace at [`anonmllab/inclad-bench`](https://huggingface.co/datasets/anonmllab/inclad-bench) and loaded automatically at runtime.
+Manifests are published on HuggingFace at [`lifelonglab/inclad-benchmark`](https://huggingface.co/datasets/lifelonglab/inclad-benchmark) and loaded automatically at runtime.
 
 Categories are selected as **2 easiest + 2 median + 2 hardest** per dataset (BTech uses all 3), based on STE ROC-AUC rankings:
 
@@ -191,3 +198,14 @@ registry — see the [InCLAD-Bench documentation](docs/inclad-bench-dataset.md)
 for details.
 
 **[Full InCLAD-MD documentation](docs/inclad-md-dataset.md)**
+
+## Citation
+
+```bibtex
+@inproceedings{marcjan2026inclad,
+  title     = {{InCLAD}: A Continual Learning Benchmark for Industrial Visual Anomaly Detection},
+  author    = {Marcjan, {\L}ukasz and Wilk-Ko{\l}odziejczyk, Dorota and Corizzo, Roberto},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS), Evaluations and Datasets Track},
+  year      = {2026}
+}
+```

@@ -21,6 +21,7 @@ from pyclad.data.datasets.concepts_dataset import ConceptsDataset
 from pyclad.models.model import Model
 from pyclad.output.output_writer import InfoProvider
 from pyclad.scenarios.concept_incremental import ConceptIncrementalScenario
+from pyclad.strategies.vision.cfa_cl_bounded import RetainedMemoryCallback  # cfa-bounded: added
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +67,13 @@ generate_seeds = _BASE.generate_seeds
 log_dataset_overview = _BASE.log_dataset_overview
 read_registered_visual_benchmark_dataset = _BASE.read_registered_visual_benchmark_dataset
 resolve_visual_benchmark_root = _BASE.resolve_visual_benchmark_root
+canonicalize_inclad_md_benchmark = _BASE.canonicalize_inclad_md_benchmark
+load_inclad_md_dataset = _BASE.load_inclad_md_dataset
 replay_buffer_file_suffix = _BASE.replay_buffer_file_suffix
 ordering_output_suffix = _BASE.ordering_output_suffix
 resolve_replay_buffer_size = _BASE.resolve_replay_buffer_size
 traceback = _BASE.traceback
+build_scenario = _BASE.build_scenario
 
 
 def default_results_root(model: str, strategy: str) -> pathlib.Path:
@@ -88,7 +92,9 @@ def parse_args() -> argparse.Namespace:
     extra_parser.add_argument(
         "--strategy",
         type=str,
-        choices=["naive", "cumulative", "replay", "ste", "cl"],
+        # cfa-bounded: original choices kept for reference --
+        # choices=["naive", "cumulative", "replay", "ste", "cl", "ucad"],
+        choices=["naive", "cumulative", "replay", "ste", "cl", "ucad", "cl-bounded", "cl-full"],
         default=None,
         help="Continual-learning strategy",
     )
@@ -96,7 +102,11 @@ def parse_args() -> argparse.Namespace:
         "--continual-memory-bank-size",
         type=int,
         default=None,
-        help="Explicit PatchCore CL memory-bank budget. Defaults to the replay-buffer-derived size.",
+        # Kept for command-line compatibility. PatchCoreCLStrategy does not read it:
+        # its history budget is previous_ratio (0.25) x |current-task coreset|.
+        help="Recorded in run_config only; it does not change PatchCore CL. The released PatchCore CL "
+        "keeps the current task's full coreset and shrinks all earlier tasks to a shared budget of "
+        "previous_ratio x |current coreset|, with previous_ratio fixed at 0.25.",
     )
     extra_parser.add_argument(
         "--eval-level",
@@ -131,7 +141,28 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Skip anomalous test samples that do not provide a pixel-level mask (default: True).",
     )
+    # seed-offset: added -- lets one seed run per job: --n-runs 1 --seed-offset k
+    # runs the k-th seed derived from the master seed.
+    extra_parser.add_argument(
+        "--seed-offset",
+        type=int,
+        default=0,
+        help="Skip the first K seeds derived from --master-seed (with --n-runs 1, runs the K-th seed).",
+    )
     extra_args, remaining = extra_parser.parse_known_args()
+
+    # --help is answered by the base parser, whose --strategy choices omit the CL
+    # strategies; print this runner's own options first so they are visible.
+    if any(argument in {"-h", "--help"} for argument in sys.argv[1:]):
+        help_parser = argparse.ArgumentParser(
+            add_help=False,
+            usage=argparse.SUPPRESS,
+            parents=[extra_parser],
+            description="CL-runner options. These take precedence over the same-named base options listed "
+            "further below; in particular --strategy also accepts cl (PaDiM CL, PatchCore CL, CFA CL), "
+            "cl-bounded and cl-full (CFA only).",
+        )
+        print(help_parser.format_help())
 
     original_argv = sys.argv[:]
     try:
@@ -143,6 +174,7 @@ def parse_args() -> argparse.Namespace:
     if extra_args.strategy is not None:
         args.strategy = extra_args.strategy
     args.continual_memory_bank_size = extra_args.continual_memory_bank_size
+    args.seed_offset = int(extra_args.seed_offset)  # seed-offset: added
     args.eval_level = extra_args.eval_level
     args.pixel_threshold = extra_args.pixel_threshold
     args.pixel_threshold_mode = extra_args.pixel_threshold_mode
@@ -290,7 +322,9 @@ def run_single(
 
             logger.info("  [3/5] Building strategy and callbacks")
             replay_buffer_size = 0
-            if args.strategy == "replay" or (args.model == "cfa" and args.strategy == "cl"):
+            # cfa-bounded: original condition kept for reference --
+            # if args.strategy == "replay" or (args.model == "cfa" and args.strategy == "cl"):
+            if args.strategy == "replay" or (args.model == "cfa" and args.strategy in {"cl", "cl-bounded", "cl-full"}):
                 replay_buffer_size = resolve_replay_buffer_size(args, run_dataset)
                 run_payload["replay_buffer_fraction"] = args.replay_buffer_fraction
                 run_payload["replay_buffer_size"] = replay_buffer_size
@@ -309,6 +343,8 @@ def run_single(
                 dataset_root=dataset_root,
             )
 
+            # cfa-bounded: added -- bytes kept from past tasks, after every task
+            callbacks.append(RetainedMemoryCallback(strategy))
             callbacks.append(
                 JsonCheckpointCallback(
                     output_path=output_path,
@@ -317,7 +353,8 @@ def run_single(
                 )
             )
 
-            scenario = ConceptIncrementalScenario(
+            scenario = build_scenario(
+                strategy_name=args.strategy,
                 dataset=run_dataset,
                 strategy=strategy,
                 callbacks=callbacks,
@@ -357,6 +394,8 @@ def main() -> None:
         handlers=[logging.StreamHandler()],
     )
     logging.getLogger("pyclad.scenarios.concept_incremental").setLevel(logging.WARNING)
+    # InCLAD-MD aliases (e.g. the recorded "multidataset_seq_v1") -> "inclad-md".
+    is_inclad_md = canonicalize_inclad_md_benchmark(args)
 
     if args.strategy == "ste" and args.n_runs > 1:
         logger.warning(
@@ -365,7 +404,9 @@ def main() -> None:
         )
 
     output_dir = resolve_output_dir(args)
-    seeds = generate_seeds(args.master_seed, args.n_runs)
+    # seed-offset: original line kept for reference --
+    # seeds = generate_seeds(args.master_seed, args.n_runs)
+    seeds = generate_seeds(args.master_seed, args.seed_offset + args.n_runs)[args.seed_offset:]
     logger.info("Master seed: %d  →  per-run seeds: %s", args.master_seed, seeds)
     logger.info("Results directory: %s", output_dir)
     logger.info("[1/2] Loading dataset")
@@ -381,10 +422,17 @@ def main() -> None:
         args.max_test,
         args.eval_level,
     )
-    if args.strategy == "replay" or (args.model == "cfa" and args.strategy == "cl"):
+    # cfa-bounded: original condition kept for reference --
+    # if args.strategy == "replay" or (args.model == "cfa" and args.strategy == "cl"):
+    if args.strategy == "replay" or (args.model == "cfa" and args.strategy in {"cl", "cl-bounded", "cl-full"}):
         logger.info("Replay buffer fraction: %.2f", args.replay_buffer_fraction)
     if args.strategy == "cl" and args.model == "patchcore" and args.continual_memory_bank_size is not None:
-        logger.info("PatchCore CL memory budget: %d", args.continual_memory_bank_size)
+        # Informational only: PatchCoreCLStrategy budgets history by previous_ratio.
+        logger.info(
+            "--continual-memory-bank-size=%d is recorded only; PatchCore CL uses previous_ratio=%s",
+            args.continual_memory_bank_size,
+            float(getattr(args, "patchcore_previous_ratio", 0.25)),
+        )
     if args.eval_level in {"pixel", "both"}:
         logger.info(
             "Pixel-level options: threshold_mode=%s, threshold=%.3f, quantile=%.3f, skip_missing_masks=%s",
@@ -397,6 +445,18 @@ def main() -> None:
     dataset_load_started_at = time.perf_counter()
 
     if getattr(args, "inclad_bench", False):
+        # The manifest loaders resolve their own roots; record --root (if any).
+        # Without this assignment run_single() below raised UnboundLocalError.
+        dataset_root = pathlib.Path(args.root).expanduser().resolve() if args.root else None
+
+    if getattr(args, "inclad_bench", False) and is_inclad_md:
+        dataset = load_inclad_md_dataset(
+            args,
+            resize_to=resize_to,
+            ordering=args.ordering_mode if args.ordering_mode else "easy_to_hard",
+            datasets_root=args.root,
+        )
+    elif getattr(args, "inclad_bench", False):
         from pyclad.data.datasets.inclad_bench_dataset import InCLADBenchDataset
 
         inclad_ordering = args.ordering_mode if args.ordering_mode else "easy_to_hard"

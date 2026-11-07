@@ -129,6 +129,14 @@ class VisualBenchmarkReader(ABC):
             name=dataset_name or f"{self.name.upper()}-VisualBenchmark",
             train_concepts=train_concepts,
             test_concepts=test_concepts,
+            test_samples_by_concept={
+                category: [
+                    sample
+                    for sample in samples
+                    if sample.category == category and sample.split == "test"
+                ]
+                for category in selected_categories
+            },
         )
 
 
@@ -676,5 +684,4 @@ def _dagm_mask_path(label_dir: Path, image_path: Path) -> Optional[Path]:
         if path.is_file() and path.stem.lower() == expected_stem and path.suffix.lower() in valid_suffixes:
             return path
     return None
-
 

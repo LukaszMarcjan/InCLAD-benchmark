@@ -1,4 +1,5 @@
 from typing import List
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -12,7 +13,8 @@ def test_correct_current_size(expected: List[int]):
         callback = MemoryUsageCallback()
         for i, value in enumerate(expected):
             mock_tracemalloc.get_traced_memory.return_value = (value, 0)
-            callback.after_concept_processing(str(i))
+            # after_concept_processing takes a Concept and reads its name
+            callback.after_concept_processing(SimpleNamespace(name=str(i)))
 
         results = callback.info()["memory_usage_callback"]["current_memory_usage"]
         for i, value in enumerate(expected):
@@ -25,7 +27,8 @@ def test_correct_peak_size(expected: List[int]):
         callback = MemoryUsageCallback()
         for i, value in enumerate(expected):
             mock_tracemalloc.get_traced_memory.return_value = (0, value)
-            callback.after_concept_processing(str(i))
+            # after_concept_processing takes a Concept and reads its name
+            callback.after_concept_processing(SimpleNamespace(name=str(i)))
 
         results = callback.info()["memory_usage_callback"]["peak_memory_usage"]
         for i, value in enumerate(expected):

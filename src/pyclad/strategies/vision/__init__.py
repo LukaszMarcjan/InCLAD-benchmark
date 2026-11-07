@@ -1,4 +1,4 @@
-__all__ = ["PaDiMCLStrategy", "PatchCoreCLStrategy", "CFACLStrategy"]
+__all__ = ["PaDiMCLStrategy", "PatchCoreCLStrategy", "CFACLStrategy", "UCADStrategy"]
 
 
 def __getattr__(name: str):
@@ -14,4 +14,8 @@ def __getattr__(name: str):
         from pyclad.strategies.vision.cfa_cl import CFACLStrategy
 
         return CFACLStrategy
+    if name == "UCADStrategy":
+        from pyclad.strategies.vision.ucad import UCADStrategy
+
+        return UCADStrategy
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

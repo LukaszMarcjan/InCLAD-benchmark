@@ -172,9 +172,15 @@ lightning_logs
 
 ## Datasets
 /src/pyclad/data/datasets/visual_datasets/
-/src/pyclad/models/draem/
+# camera-ready: DRAEM is shipped (tests/models/test_draem.py needs it); original rule kept for reference --
+# /src/pyclad/models/draem/
 /neurips/
 /busbs/
 /ordering_files/
-/examples/visual_models/neurips_utilities/
+# camera-ready: paper utilities are shipped (README, rebuild_main_table.py); original rule kept for reference --
+# /examples/visual_models/neurips_utilities/
 /examples/visual_models/plot_multidataset_lineplot.py
+
+# Default outputs of the table builders and grid results
+/InCLAD_camera_ready_*/
+/results_grouped_grid/

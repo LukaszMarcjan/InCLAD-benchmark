@@ -259,6 +259,8 @@ class PatchCore(Model):
         self._feature_map_size: Optional[tuple[int, int]] = None
         self._threshold = self.config.threshold
         self._nn_index: Optional[NearestNeighbors] = None
+        self._last_prediction_data: Optional[np.ndarray] = None
+        self._last_prediction_maps: Optional[np.ndarray] = None
 
     def _prepare_batches(self, data: np.ndarray) -> DataLoader:
         x_t = self._preprocessor.transform(data)
@@ -347,6 +349,8 @@ class PatchCore(Model):
         if len(data) == 0:
             return
 
+        self._last_prediction_data = None
+        self._last_prediction_maps = None
         embeddings, patch_shapes = self._extract_embeddings(data, provide_patch_shapes=True)
         self._feature_map_size = tuple(patch_shapes[0])
         self._memory_bank = self._coreset_sampler.run(embeddings)
@@ -389,7 +393,10 @@ class PatchCore(Model):
         if len(data) == 0:
             return np.asarray([], dtype=np.float32)
 
-        _, masks = self._predict_scores_and_masks(data)
+        if data is self._last_prediction_data and self._last_prediction_maps is not None:
+            masks = self._last_prediction_maps
+        else:
+            _, masks = self._predict_scores_and_masks(data)
         if resize_to_input:
             return masks
 
@@ -415,7 +422,12 @@ class PatchCore(Model):
         return float(np.quantile(scores, self.config.threshold_quantile))
 
     def predict(self, data: np.ndarray) -> (np.ndarray, np.ndarray):
-        anomaly_scores = self.score_data(data)
+        if len(data) == 0:
+            return np.asarray([], dtype=int), np.asarray([], dtype=np.float32)
+
+        anomaly_scores, masks = self._predict_scores_and_masks(data)
+        self._last_prediction_data = data
+        self._last_prediction_maps = masks
         threshold = self._resolve_threshold(anomaly_scores)
         y_pred = (anomaly_scores > threshold).astype(int)
         return y_pred, anomaly_scores

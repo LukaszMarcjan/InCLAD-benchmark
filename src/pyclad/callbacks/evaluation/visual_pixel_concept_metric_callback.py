@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -12,6 +12,7 @@ from pyclad.callbacks.evaluation.visual_pixel_utils import (
     load_ground_truth_masks_for_samples,
 )
 from pyclad.data.concept import Concept
+from pyclad.data.readers.visual_benchmark_reader import VisualSample
 from pyclad.metrics.base.base_metric import BaseMetric
 from pyclad.metrics.base.pixel_threshold_utils import resolve_pixel_threshold
 from pyclad.metrics.continual.concepts_metric import (
@@ -37,6 +38,7 @@ class VisualPixelConceptMetricCallback(Callback, InfoProvider):
         threshold_mode: str = "fixed",
         fixed_threshold: float = 0.5,
         threshold_quantile: float = 0.995,
+        test_samples_by_concept: Optional[Mapping[str, Sequence[VisualSample]]] = None,
     ):
         self._strategy = strategy
         if base_metrics is not None:
@@ -54,13 +56,19 @@ class VisualPixelConceptMetricCallback(Callback, InfoProvider):
         self._threshold_mode = str(threshold_mode)
         self._fixed_threshold = float(fixed_threshold)
         self._threshold_quantile = float(threshold_quantile)
-        self._test_samples_by_concept = index_registered_visual_test_samples(
-            benchmark=benchmark,
-            root=root,
-            registry_path=registry_path,
-            categories=categories,
-            max_test_samples_per_category=max_test_samples_per_category,
-        )
+        if test_samples_by_concept is None:
+            self._test_samples_by_concept = index_registered_visual_test_samples(
+                benchmark=benchmark,
+                root=root,
+                registry_path=registry_path,
+                categories=categories,
+                max_test_samples_per_category=max_test_samples_per_category,
+            )
+        else:
+            self._test_samples_by_concept = {
+                str(concept_name): list(samples)
+                for concept_name, samples in test_samples_by_concept.items()
+            }
 
     def after_training(self, learned_concept: Concept):
         self._learned_concepts.append(learned_concept.name)

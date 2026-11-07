@@ -1,16 +1,12 @@
 # InCLAD-MD Dataset
 
-> **Anonymous review note:** author and maintainer metadata has been redacted
-> in this artifact for double-blind review. Required open-source license notices
-> are retained, and full attribution will be restored in the de-anonymized
-> public release.
-
 InCLAD-MD is a multi-dataset sequential benchmark for continual visual anomaly detection.
 It combines selected categories from all five InCLAD-Bench source datasets (BTech, DAGM,
-MPDD, MVTec AD, VisA) into a single curriculum sequence.
+MPDD, MVTec AD, VisA) into a single 27-task curriculum.
 
-The benchmark manifests are published on HuggingFace:
-[`anonmllab/inclad-md`](https://huggingface.co/datasets/anonmllab/inclad-md)
+The benchmark manifests are published on HuggingFace as the `inclad-md` config of
+[`lifelonglab/inclad-benchmark`](https://huggingface.co/datasets/lifelonglab/inclad-benchmark),
+with two splits, `easy_to_hard` and `hard_to_easy`.
 
 > **Important:** The HuggingFace repository contains only manifests (metadata). Images
 > must be downloaded from each source dataset separately. See the
@@ -33,15 +29,17 @@ except for BTech which has only 3 categories and uses all three.
 | VisA (6)   | `visa__pcb4`, `visa__chewinggum`, `visa__fryum`, `visa__pcb2`, `visa__macaroni2`, `visa__capsules` |
 
 Category names are prefixed with the source dataset name (`<dataset>__<category>`) to
-avoid collisions.
+avoid collisions. The selection and both curricula are defined in
+`examples/visual_models/neurips_utilities/multidataset_ordering/`.
 
 ## Orderings
+
+InCLAD-MD has two orderings (there is no `random` split):
 
 | Split | Description |
 |-------|-------------|
 | `easy_to_hard` | Dataset blocks ordered easiest-first, categories within each block easiest-first |
-| `hard_to_easy` | Exact reverse of `easy_to_hard` |
-| `random`       | Uniformly shuffled, seeded for reproducibility |
+| `hard_to_easy` | Exact reverse of `easy_to_hard` (block order and order within blocks) |
 
 Dataset block order in `easy_to_hard`: BTech → MPDD → DAGM → VisA → MVTec
 
@@ -49,7 +47,8 @@ Dataset block order in `easy_to_hard`: BTech → MPDD → DAGM → VisA → MVTe
 
 ## Manifest schema
 
-Same 15-column schema as InCLAD-Bench, extended with `source_category`:
+The InCLAD-Bench manifests have 14 columns; InCLAD-MD adds `source_category`,
+for 15 columns:
 
 | Column | Description |
 |--------|-------------|
@@ -63,102 +62,46 @@ Same 15-column schema as InCLAD-Bench, extended with `source_category`:
 | `mask_relpath` | Mask path relative to the source dataset root (empty for normal) |
 | `image_label` | `0` = normal, `1` = anomalous |
 | `defect_type` | Defect class name (empty for normal) |
-| `ordering_name` | `easy_to_hard`, `hard_to_easy`, or `random` |
-| `ordering_master_seed` | Master seed |
-| `ordering_seed` | Per-split derived seed |
+| `ordering_name` | `easy_to_hard` or `hard_to_easy` |
+| `ordering_master_seed` | Master seed (`42`) |
+| `ordering_seed` | Per-run seed derived from the master seed (run index 0: `191664963`, the seed of every InCLAD-MD paper run); informational, the curricula are fixed |
 | `source_homepage` | URL of the source dataset |
 | `source_license` | License of the source dataset |
 
 `image_relpath` is **relative to the source dataset's root**, not a single shared root.
 The loader resolves each image as `roots[source_dataset] / image_relpath`.
 
+`ordering_seed` is informational: `inclad-md_hard_to_easy.csv` records `1662057957`,
+the second seed derived from 42, while the paper runs used `191664963` for both
+orderings. The curricula are fixed, so the column does not affect loading. BTech rows
+list the license as `CC BY-SA`; it is CC BY-SA 4.0.
+
 ---
 
-## Generating and uploading manifests to HuggingFace
-
-### Step 1 — Generate the manifests
+## Rebuilding the manifests
 
 ```bash
-python examples/visual_models/build_inclad_md_manifest.py \
-    --output-dir /tmp/inclad_md_hf
+python examples/visual_models/neurips_utilities/build_inclad_md_manifest.py \
+    --from-hf --hf-filenames --output-dir /tmp/inclad_md_hf
 ```
 
-This reads the ordering files from `examples/visual_models/multidataset_ordering_v1/`
-and the per-benchmark manifests from
-`src/pyclad/data/datasets/visual_datasets/manifests/`, and writes:
+The builder reads the selection and the two curricula from
+`examples/visual_models/neurips_utilities/multidataset_ordering/` and the
+per-benchmark InCLAD-Bench manifests (`<benchmark>_easy_to_hard_samples.csv`). Those
+manifests are not shipped in this repository: `--from-hf` downloads them from
+`lifelonglab/inclad-benchmark`, or pass `--manifests-dir <dir>` pointing at a folder
+that holds them (for example a local snapshot of the HF repository). It writes:
 
 ```
 /tmp/inclad_md_hf/
-  easy_to_hard.csv
-  hard_to_easy.csv
-  random.csv
+  inclad-md_easy_to_hard.csv     (easy_to_hard.csv without --hf-filenames)
+  inclad-md_hard_to_easy.csv     (hard_to_easy.csv without --hf-filenames)
 ```
 
-### Step 2 — Create the HuggingFace repository
-
-Create a new dataset repository at https://huggingface.co/new-dataset:
-
-- **Owner**: `anonmllab`
-- **Name**: `inclad-md`
-- **License**: MIT
-
-### Step 3 — Write the dataset card (README.md)
-
-Create `README.md` in the repo root with the YAML front matter that defines
-the splits:
-
-```yaml
----
-license: mit
-task_categories:
-  - image-classification
-tags:
-  - anomaly-detection
-  - continual-learning
-  - industrial-anomaly-detection
-configs:
-  - config_name: default
-    data_files:
-      - split: easy_to_hard
-        path: easy_to_hard.csv
-      - split: hard_to_easy
-        path: hard_to_easy.csv
-      - split: random
-        path: random.csv
----
-```
-
-### Step 4 — Upload via huggingface_hub
-
-```bash
-pip install huggingface_hub
-huggingface-cli login
-```
-
-```python
-from huggingface_hub import HfApi
-
-api = HfApi()
-api.upload_folder(
-    folder_path="/tmp/inclad_md_hf",
-    repo_id="anonmllab/inclad-md",
-    repo_type="dataset",
-)
-```
-
-Or push the CSV files individually:
-
-```python
-for split in ("easy_to_hard", "hard_to_easy", "random"):
-    api.upload_file(
-        path_or_fileobj=f"/tmp/inclad_md_hf/{split}.csv",
-        path_in_repo=f"{split}.csv",
-        repo_id="anonmllab/inclad-md",
-        repo_type="dataset",
-    )
-```
-
----
+By default both files get `ordering_master_seed=42`, `ordering_seed=191664963` (the
+seed of the paper runs) and `source_license="CC BY-SA 4.0"` for BTech rows. To
+rebuild the published files byte for byte, add
+`--seed-mode published --keep-source-license`.
 
 ## Using InCLAD-MD with pyCLAD
 
@@ -168,7 +111,7 @@ for split in ("easy_to_hard", "hard_to_easy", "random"):
 from pyclad.data.datasets.inclad_md_dataset import InCLADMDDataset
 
 dataset = InCLADMDDataset(
-    ordering="easy_to_hard",
+    ordering="easy_to_hard",          # or "hard_to_easy"
     roots={
         "mvtec": "/data/mvtec_ad",
         "btech": "/data/BTech_Dataset_transformed",
@@ -182,31 +125,70 @@ dataset = InCLADMDDataset(
 
 ### Root resolution
 
-Roots for each source dataset are resolved in the same priority order as InCLAD-Bench:
+Each source dataset root is resolved by `resolve_visual_benchmark_root`, in this order:
 
 1. `roots={"mvtec": "/data/mvtec_ad", ...}` parameter
-2. Per-benchmark env vars: `PYCLAD_MVTEC_ROOT`, `PYCLAD_VISA_ROOT`
-3. Shared env var `PYCLAD_VISUAL_DATASETS_ROOT` with auto-detected subfolders
-4. Registry JSON `src/pyclad/data/datasets/visual_datasets/registry.json`
+2. Registry JSON: `registry_path=` argument, else the file named by
+   `PYCLAD_VISUAL_DATASETS_FILE`, else `src/pyclad/data/datasets/visual_datasets/registry.json`.
+   The file is not shipped (that directory is gitignored); create it by hand or with
+   `pyclad.data.readers.visual_dataset_registry.write_visual_dataset_registry({...})`.
+3. Per-benchmark environment variables, which exist only for MVTec and VisA:
+   `PYCLAD_MVTEC_ROOT`, `PYCLAD_VISA_ROOT`
+4. Shared `PYCLAD_VISUAL_DATASETS_ROOT` with auto-detected subfolders (see the
+   [InCLAD-Bench guide](inclad-bench-dataset.md#step-2--register-dataset-locations))
+
+A registry entry therefore overrides the environment variables. The CLI runners pass
+`--root` to InCLAD-MD by exporting it as `PYCLAD_VISUAL_DATASETS_ROOT` (step 4), so a
+registry entry also takes priority over `--root`.
 
 ### CLI
 
+`--root` is the parent directory that holds the five source dataset folders.
+Non-CL strategies (`naive`, `replay`) use `run_continual_visual_ad.py`; the `cl`
+strategy uses `run_continual_visual_ad_cl.py`:
+
 ```bash
-python examples/clvad/run_continual_visual_ad.py \
-    --model patchcore \
-    --strategy naive \
-    --benchmark inclad_md \
-    --inclad-bench \
-    --ordering-mode easy_to_hard \
-    --resize 224
+PYTHONPATH=src python examples/clvad/run_continual_visual_ad.py \
+    --model paste --strategy replay \
+    --benchmark inclad-md --inclad-bench --ordering-mode easy_to_hard \
+    --root /data --backbone resnet18 --pretrained \
+    --eval-level both --pixel-threshold-mode train-quantile --pixel-threshold-quantile 0.95 \
+    --replay-buffer-fraction 0.2 --n-runs 1 --master-seed 42
+
+PYTHONPATH=src python examples/clvad/run_continual_visual_ad_cl.py \
+    --model cfa --strategy cl \
+    --benchmark inclad-md --inclad-bench --ordering-mode hard_to_easy \
+    --root /data --backbone wide_resnet50_2 --pretrained --batch-size 32 --epochs 50 \
+    --eval-level both --pixel-threshold-mode train-quantile --pixel-threshold-quantile 0.95 \
+    --replay-buffer-fraction 0.2 --n-runs 1 --master-seed 42
 ```
+
+The checkpointed runner `examples/clvad/run_continual_visual_ad_resumable.py`
+(One-for-More, ReplayCAD, UCAD only) accepts the same `--benchmark inclad-md
+--inclad-bench` flags.
+
+### Settings of the paper's InCLAD-MD runs
+
+The MultiDataset rows of Table 2 use CFA, PaDiM and PaSTe with these settings:
+
+| Method | Strategies | Backbones | Orderings | Model flags |
+|--------|-----------|-----------|-----------|-------------|
+| CFA    | `naive`, `cl` | `resnet18`, `wide_resnet50_2` | both | `--pretrained --batch-size 32 --epochs 50` |
+| PaDiM  | `cl` (both backbones), `naive` (`wide_resnet50_2` only) | `resnet18`, `wide_resnet50_2` | both | `--pretrained --batch-size 32 --epochs 50` |
+| PaSTe  | `naive`, `replay` | `resnet18`, `wide_resnet50_2` | both | `--pretrained` (model-default batch size and epochs) |
+
+All runs: `--eval-level both --pixel-threshold 0.5 --pixel-threshold-mode train-quantile
+--pixel-threshold-quantile 0.95 --replay-buffer-fraction 0.2 --n-runs 1 --master-seed 42`
+(per-run seed `191664963`), `--device cuda:0`. CFA and PaDiM runs selected the
+curriculum with `--ordering-mode`, PaSTe runs with `--ordering-file`; with
+`--inclad-bench` use `--ordering-mode` for all of them.
 
 ### More examples
 
 ```python
 from pyclad.data.datasets.inclad_md_dataset import load_inclad_md
 
-# Only BTech and DAGM categories
+# Only BTech and DAGM categories. An explicit category list also sets the task order.
 dataset = load_inclad_md(
     ordering="easy_to_hard",
     categories=[
@@ -218,7 +200,4 @@ dataset = load_inclad_md(
 
 # Paths only (no image loading)
 dataset = load_inclad_md(ordering="hard_to_easy", data_mode="paths")
-
-# Random ordering
-dataset = load_inclad_md(ordering="random", resize_to=(224, 224))
 ```

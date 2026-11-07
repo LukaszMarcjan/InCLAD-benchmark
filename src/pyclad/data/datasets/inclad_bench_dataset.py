@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Literal, Optional, Sequence, Union
 
-from datasets import load_dataset
+from datasets import Features, Value, load_dataset
 
 from pyclad.data.datasets.concepts_dataset import ConceptsDataset
 from pyclad.data.readers.visual_benchmark_manifest import (
@@ -15,7 +15,16 @@ from pyclad.data.readers.visual_benchmark_manifest import (
 from pyclad.data.readers.visual_benchmark_reader import read_visual_benchmark_dataset
 from pyclad.data.readers.visual_dataset_registry import resolve_visual_benchmark_root
 
-INCLAD_BENCH_HF_REPO = "anonmllab/inclad-bench"
+# Anonymous-review mirror, kept for reference; its manifests are byte-identical
+# to the public repository apart from line endings.
+INCLAD_BENCH_HF_REPO_ANONYMOUS = "anonmllab/inclad-bench"
+INCLAD_BENCH_HF_REPO = "lifelonglab/inclad-benchmark"
+
+# Commit of the Hugging Face dataset repository whose manifests were checked
+# against the camera-ready results. Pass ``revision=INCLAD_BENCH_HF_REVISION``
+# to pin a load to it; the default (``revision=None``) follows the repository's
+# ``main`` branch.
+INCLAD_BENCH_HF_REVISION = "c73c153e26b19a69b08dc11a47d59967295658d9"
 
 INCLAD_BENCH_CONFIGS = ("btech", "dagm", "mpdd", "mvtec", "visa")
 
@@ -24,10 +33,20 @@ INCLAD_BENCH_ORDERINGS = ("easy_to_hard", "hard_to_easy", "random")
 InCLADBenchConfig = Literal["btech", "dagm", "mpdd", "mvtec", "visa"]
 InCLADBenchOrdering = Literal["easy_to_hard", "hard_to_easy", "random"]
 
+# Every manifest column is read as a string. Left to type inference, the
+# Hugging Face CSV builder parses BTech categories '01', '02', '03' as integers
+# and the leading zeros are lost before any later conversion can restore them.
+INCLAD_BENCH_MANIFEST_FEATURES = Features(
+    {column: Value("string") for column in VISUAL_BENCHMARK_MANIFEST_FIELDNAMES}
+)
+
 
 def _hf_manifest_to_csv(hf_dataset, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    df = hf_dataset.to_pandas()
+    # Hugging Face converts empty optional CSV cells to NaN in pandas. If
+    # stringified directly, values such as an absent normal-image mask become
+    # the literal path "nan". Restore missing manifest cells before writing.
+    df = hf_dataset.to_pandas().fillna("")
 
     with output_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=VISUAL_BENCHMARK_MANIFEST_FIELDNAMES)
@@ -42,7 +61,7 @@ def _hf_manifest_to_csv(hf_dataset, output_path: Path) -> Path:
 class InCLADBenchDataset(ConceptsDataset):
     """
     Loader for the InCLAD-Bench benchmark hosted on HuggingFace
-    (https://huggingface.co/datasets/anonmllab/inclad-bench).
+    (https://huggingface.co/datasets/lifelonglab/inclad-benchmark).
 
     The HuggingFace dataset contains sample manifests (metadata with image
     relative paths, labels, and category orderings) for five visual anomaly
@@ -67,6 +86,7 @@ class InCLADBenchDataset(ConceptsDataset):
         max_train_samples_per_category: Optional[int] = None,
         max_test_samples_per_category: Optional[int] = None,
         cache_dir: Optional[str] = None,
+        revision: Optional[str] = None,
     ):
         """
         :param benchmark: One of ``"btech"``, ``"dagm"``, ``"mpdd"``, ``"mvtec"``, ``"visa"``.
@@ -85,6 +105,9 @@ class InCLADBenchDataset(ConceptsDataset):
         :param max_train_samples_per_category: Cap on training samples per category.
         :param max_test_samples_per_category: Cap on test samples per category.
         :param cache_dir: HuggingFace cache directory. ``None`` uses the default.
+        :param revision: Hugging Face revision (commit, branch or tag) of the
+            manifest repository. ``None`` uses ``main``; pass
+            :data:`INCLAD_BENCH_HF_REVISION` for the camera-ready manifests.
         """
         benchmark_key = benchmark.lower()
         if benchmark_key not in INCLAD_BENCH_CONFIGS:
@@ -102,7 +125,12 @@ class InCLADBenchDataset(ConceptsDataset):
         )
 
         hf_dataset = load_dataset(
-            INCLAD_BENCH_HF_REPO, benchmark_key, split=ordering, cache_dir=cache_dir
+            INCLAD_BENCH_HF_REPO,
+            benchmark_key,
+            split=ordering,
+            cache_dir=cache_dir,
+            revision=revision,
+            features=INCLAD_BENCH_MANIFEST_FEATURES,
         )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -128,6 +156,7 @@ class InCLADBenchDataset(ConceptsDataset):
             name=dataset.name(),
             train_concepts=dataset.train_concepts(),
             test_concepts=dataset.test_concepts(),
+            test_samples_by_concept=dataset.test_samples_by_concept(),
         )
 
 
@@ -143,6 +172,7 @@ def load_inclad_bench(
     max_train_samples_per_category: Optional[int] = None,
     max_test_samples_per_category: Optional[int] = None,
     cache_dir: Optional[str] = None,
+    revision: Optional[str] = None,
 ) -> ConceptsDataset:
     """Convenience function to load an InCLAD-Bench dataset.
 
@@ -160,4 +190,5 @@ def load_inclad_bench(
         max_train_samples_per_category=max_train_samples_per_category,
         max_test_samples_per_category=max_test_samples_per_category,
         cache_dir=cache_dir,
+        revision=revision,
     )

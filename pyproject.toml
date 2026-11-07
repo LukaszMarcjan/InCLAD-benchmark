@@ -15,10 +15,13 @@ dependencies = [
     "codecarbon>=3.0.2",
     "pydantic>=2.11.2",
 ]
-requires-python = ">= 3.8"
-# Author and maintainer metadata is intentionally redacted in the
-# anonymous-review artifact. Required license notices remain in LICENSE and
-# full attribution will be restored in the public release.
+# PEP 604 unions (``float | None``) in signatures are evaluated at import time.
+requires-python = ">= 3.10"
+authors = [
+    { name = "Łukasz Marcjan", email = "lmarcjan@agh.edu.pl" },
+    { name = "Dorota Wilk-Kołodziejczyk", email = "dwilk@agh.edu.pl" },
+    { name = "Roberto Corizzo", email = "rcorizzo@american.edu" },
+]
 readme = "README.md"
 license = { text = "MIT License" }
 keywords = ["continual anomaly detection", "continual learning", "anomaly detection", "lifelong learning"]
@@ -29,12 +32,15 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
+
+[project.urls]
+Repository = "https://github.com/LukaszMarcjan/InCLAD-benchmark"
+Dataset = "https://huggingface.co/datasets/lifelonglab/inclad-benchmark"
+Issues = "https://github.com/LukaszMarcjan/InCLAD-benchmark/issues"
 
 #[project.urls]
 #Homepage = "https://example.com"
@@ -45,6 +51,43 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["black>=24.4", "flake8>=7.1.0", "isort>=5.13.0", "pytest>=8.2.2"]
+replaycad = [
+    # Transformers blocks torch.load for torch<2.6 because of CVE-2025-32434.
+    # The MVTec LDM checkpoint contains legacy PyTorch .bin weights, so the
+    # secure ReplayCAD environment must use torch>=2.6 rather than bypassing
+    # the Transformers safety check.
+    "torch>=2.6.0,<3.0",
+    "torchvision>=0.21.0,<1.0",
+    # ReplayCAD uses the legacy LDM pipeline. Newer Diffusers releases also
+    # register Flash Attention custom ops at import time and require a newer
+    # PyTorch than pyCLAD's supported torch>=2.1 baseline.
+    "diffusers==0.31.0",
+    "transformers>=4.44.0,<5.0",
+    "accelerate>=0.34.0,<2.0",
+    "safetensors>=0.4.0",
+    "opencv-python-headless>=4.8.0",
+    "segment-anything @ https://github.com/facebookresearch/segment-anything/archive/6fdee8f2727f4506cfbbe553e23b895e27956588.zip",
+]
+ucad = [
+    "torch>=2.1.0,<3.0",
+    "torchvision>=0.16.0,<1.0",
+    "timm>=0.9.0,<2.0",
+    "scipy>=1.10.0,<2.0",
+    "Pillow>=9.0.0",
+    "segment-anything @ https://github.com/facebookresearch/segment-anything/archive/6fdee8f2727f4506cfbbe553e23b895e27956588.zip",
+]
+one-for-more = [
+    "torch>=2.1.0,<3.0",
+    "torchvision>=0.16.0,<1.0",
+    "scipy>=1.10.0,<2.0",
+    "tqdm>=4.66.0,<5.0",
+    "diffusers>=0.31.0,<1.0",
+    "safetensors>=0.4.0",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
 
 [tool.black]
 line-length = 120

@@ -24,8 +24,8 @@ def _write_rgb_image(path: Path, color: tuple[int, int, int]):
 @pytest.mark.parametrize(
     ("ordering_path", "expected_benchmark"),
     [
-        ("examples/visual_models/ordering_v2/btech_easy_to_hard_roc-auc.csv", "btech"),
-        ("examples/visual_models/ordering_v2/mvtec_easy_to_hard_roc-auc.csv", "mvtec"),
+        ("examples/visual_models/ordering/btech_easy_to_hard_roc-auc.csv", "btech"),
+        ("examples/visual_models/ordering/mvtec_easy_to_hard_roc-auc.csv", "mvtec"),
     ],
 )
 def test_infer_visual_benchmark_from_ordering_path(ordering_path: str, expected_benchmark: str):
@@ -33,7 +33,7 @@ def test_infer_visual_benchmark_from_ordering_path(ordering_path: str, expected_
 
 
 def test_load_concept_order_from_csv_reads_concept_column():
-    ordering = load_concept_order_from_csv("examples/visual_models/ordering_v2/btech_easy_to_hard_roc-auc.csv")
+    ordering = load_concept_order_from_csv("examples/visual_models/ordering/btech_easy_to_hard_roc-auc.csv")
 
     assert ordering == ["03", "01", "02"]
 
@@ -50,7 +50,7 @@ def test_read_ordered_registered_visual_benchmark_dataset_uses_ordering_file(tmp
     registry_path = write_visual_dataset_registry({"btech": root}, registry_path=tmp_path / "registry.json")
 
     dataset = read_ordered_registered_visual_benchmark_dataset(
-        ordering_path="examples/visual_models/ordering_v2/btech_easy_to_hard_roc-auc.csv",
+        ordering_path="examples/visual_models/ordering/btech_easy_to_hard_roc-auc.csv",
         registry_path=registry_path,
         resize_to=(4, 4),
     )

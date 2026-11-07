@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal, Optional, Sequence, Union
 
 import numpy as np
-from datasets import load_dataset
+from datasets import Features, Value, load_dataset
 
 from pyclad.data.concept import Concept
 from pyclad.data.datasets.concepts_dataset import ConceptsDataset
@@ -17,8 +17,41 @@ from pyclad.data.readers.visual_benchmark_reader import (
 )
 from pyclad.data.readers.visual_dataset_registry import resolve_visual_benchmark_root
 
-INCLAD_MD_HF_REPO = "anonmllab/inclad-bench"
+# Anonymous-review mirror, kept for reference.
+INCLAD_MD_HF_REPO_ANONYMOUS = "anonmllab/inclad-bench"
+INCLAD_MD_HF_REPO = "lifelonglab/inclad-benchmark"
 INCLAD_MD_HF_CONFIG = "inclad-md"
+
+# Commit of the Hugging Face dataset repository whose InCLAD-MD manifests were
+# checked against the camera-ready results (same repository and commit as
+# ``INCLAD_BENCH_HF_REVISION``). ``revision=None`` follows ``main``.
+INCLAD_MD_HF_REVISION = "c73c153e26b19a69b08dc11a47d59967295658d9"
+
+INCLAD_MD_MANIFEST_FIELDNAMES = (
+    "sample_id",
+    "source_dataset",
+    "source_category",
+    "category",
+    "category_order",
+    "split",
+    "image_relpath",
+    "mask_relpath",
+    "image_label",
+    "defect_type",
+    "ordering_name",
+    "ordering_master_seed",
+    "ordering_seed",
+    "source_homepage",
+    "source_license",
+)
+
+# Read every manifest column as a string so that values such as the BTech
+# source categories '01', '02', '03' keep their leading zeros. Without it the
+# CSV builder infers types per chunk of rows, so ``source_category`` comes out
+# as '1', '2', '3' in chunks that hold only BTech rows.
+INCLAD_MD_MANIFEST_FEATURES = Features(
+    {column: Value("string") for column in INCLAD_MD_MANIFEST_FIELDNAMES}
+)
 
 INCLAD_MD_ORDERINGS = ("easy_to_hard", "hard_to_easy")
 
@@ -167,10 +200,14 @@ def _build_concepts_dataset(
 
     train_concepts: list[Concept] = []
     test_concepts: list[Concept] = []
+    test_samples_by_concept: dict[str, list[VisualSample]] = {}
 
     for category in ordered_categories:
         train_samples = [s for s in samples if s.category == category and s.split == "train"]
         test_samples = [s for s in samples if s.category == category and s.split == "test"]
+        # Per-concept test samples (with mask paths) for the pixel-level
+        # callbacks, matching what the single-dataset readers provide.
+        test_samples_by_concept[category] = test_samples
 
         train_concepts.append(
             Concept(
@@ -194,13 +231,14 @@ def _build_concepts_dataset(
         name=dataset_name,
         train_concepts=train_concepts,
         test_concepts=test_concepts,
+        test_samples_by_concept=test_samples_by_concept,
     )
 
 
 class InCLADMDDataset(ConceptsDataset):
     """
     Loader for the InCLAD-MD multi-dataset benchmark hosted on HuggingFace
-    as the ``"inclad-md"`` config of ``anonmllab/inclad-bench``.
+    as the ``"inclad-md"`` config of ``lifelonglab/inclad-benchmark``.
 
     InCLAD-MD is a single sequential benchmark built from selected categories
     across all five InCLAD-Bench source datasets (BTech, DAGM, MPDD, MVTec AD,
@@ -225,6 +263,7 @@ class InCLADMDDataset(ConceptsDataset):
         max_train_samples_per_category: Optional[int] = None,
         max_test_samples_per_category: Optional[int] = None,
         cache_dir: Optional[str] = None,
+        revision: Optional[str] = None,
     ):
         """
         :param ordering: ``"easy_to_hard"`` or ``"hard_to_easy"``.
@@ -239,6 +278,9 @@ class InCLADMDDataset(ConceptsDataset):
         :param max_train_samples_per_category: Cap on training samples per category.
         :param max_test_samples_per_category: Cap on test samples per category.
         :param cache_dir: HuggingFace cache directory.
+        :param revision: Hugging Face revision (commit, branch or tag) of the
+            manifest repository. ``None`` uses ``main``; pass
+            :data:`INCLAD_MD_HF_REVISION` for the camera-ready manifests.
         """
         if ordering not in INCLAD_MD_ORDERINGS:
             raise ValueError(
@@ -249,7 +291,12 @@ class InCLADMDDataset(ConceptsDataset):
         source_roots = _resolve_roots(roots, registry_path)
 
         hf_dataset = load_dataset(
-            INCLAD_MD_HF_REPO, INCLAD_MD_HF_CONFIG, split=ordering, cache_dir=cache_dir
+            INCLAD_MD_HF_REPO,
+            INCLAD_MD_HF_CONFIG,
+            split=ordering,
+            cache_dir=cache_dir,
+            revision=revision,
+            features=INCLAD_MD_MANIFEST_FEATURES,
         )
         rows = _parse_hf_manifest(hf_dataset)
 
@@ -274,6 +321,7 @@ class InCLADMDDataset(ConceptsDataset):
             name=dataset.name(),
             train_concepts=dataset.train_concepts(),
             test_concepts=dataset.test_concepts(),
+            test_samples_by_concept=dataset.test_samples_by_concept(),
         )
 
 
@@ -288,6 +336,7 @@ def load_inclad_md(
     max_train_samples_per_category: Optional[int] = None,
     max_test_samples_per_category: Optional[int] = None,
     cache_dir: Optional[str] = None,
+    revision: Optional[str] = None,
 ) -> ConceptsDataset:
     """Convenience function — see :class:`InCLADMDDataset` for parameter docs."""
     return InCLADMDDataset(
@@ -301,4 +350,5 @@ def load_inclad_md(
         max_train_samples_per_category=max_train_samples_per_category,
         max_test_samples_per_category=max_test_samples_per_category,
         cache_dir=cache_dir,
+        revision=revision,
     )

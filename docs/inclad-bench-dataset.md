@@ -1,16 +1,11 @@
 # InCLAD-Bench Dataset
 
-> **Anonymous review note:** author and maintainer metadata has been redacted
-> in this artifact for double-blind review. Required open-source license notices
-> are retained, and full attribution will be restored in the de-anonymized
-> public release.
-
 InCLAD-Bench is a continual learning benchmark for visual anomaly detection.
 It aggregates five widely-used industrial anomaly detection datasets into a
 unified evaluation protocol with reproducible category orderings.
 
 The benchmark manifests are published on HuggingFace:
-[`anonmllab/inclad-bench`](https://huggingface.co/datasets/anonmllab/inclad-bench)
+[`lifelonglab/inclad-benchmark`](https://huggingface.co/datasets/lifelonglab/inclad-benchmark)
 
 > **Important:** The HuggingFace repository contains only manifests (metadata: file
 > paths, labels, category orderings). **Image files are not included** and must be
@@ -29,7 +24,7 @@ scenarios with diverse object categories and defect types:
 | Dataset  | Categories | Train samples | Test samples | Normal (test) | Anomalous (test) | License         |
 |----------|:----------:|:-------------:|:------------:|:-------------:|:----------------:|-----------------|
 | MVTec AD | 15         | 3,629         | 1,725        | 467           | 1,258            | CC BY-NC-SA 4.0 |
-| BTech    | 3          | 1,799         | 741          | 451           | 290              | CC BY-SA        |
+| BTech    | 3          | 1,799         | 741          | 451           | 290              | CC BY-SA 4.0    |
 | DAGM     | 10         | 7,004         | 8,050        | 6,996         | 1,054            | CC BY 4.0       |
 | MPDD     | 6          | 888           | 458          | 176           | 282              | CC BY-NC-SA 4.0 |
 | VisA     | 12         | 8,659         | 2,162        | 962           | 1,200            | CC BY 4.0       |
@@ -39,6 +34,17 @@ Each benchmark is provided with three category orderings:
 - **`easy_to_hard`** — categories ordered from the easiest to the hardest (based on single-task anomaly detection performance)
 - **`hard_to_easy`** — reverse of the above
 - **`random`** — randomly shuffled, seeded for reproducibility
+
+The `easy_to_hard` and `hard_to_easy` curricula are also shipped as CSV files in
+`examples/visual_models/ordering/` (used with `--ordering-dir`). The `random` ordering
+exists only in the HuggingFace manifests, so runs with `--ordering-mode random` need
+`--inclad-bench`. The `random` split (`ordering_master_seed=123`, `ordering_seed=33158374`)
+is the order of every Random run in the paper, which used
+`--master-seed 123 --shuffle-concepts`; pass `--master-seed 123` to get the same
+per-run seed.
+
+The `source_license` column of the published manifests lists BTech as `CC BY-SA`;
+the license is CC BY-SA 4.0.
 
 ---
 
@@ -80,11 +86,11 @@ mvtec_ad/
 ### BTech
 
 **Download:** https://github.com/pankajmishra000/VT-ADL (Dataset Download section)
-**License:** CC BY-SA
+**License:** CC BY-SA 4.0
 
 3 categories of industrial components (numbered `01`, `02`, `03`).
-Images are stored in `.bmp` format. Normal samples are labelled `ok`,
-defective samples `ko`.
+Images of categories `01` and `03` are `.bmp`, images of category `02` are `.png`.
+Normal samples are labelled `ok`, defective samples `ko`.
 
 Categories: `01`, `02`, `03`
 
@@ -216,9 +222,11 @@ the relative paths stored in the HuggingFace manifest.
 
 ### Step 2 — Register dataset locations
 
-Choose one of the following methods (checked in this order):
+The root of each benchmark is resolved by
+`pyclad.data.readers.visual_dataset_registry.resolve_visual_benchmark_root`, which
+checks the following sources in this order and uses the first that applies:
 
-**Option A — explicit root path:**
+**1 — explicit root path:**
 
 ```python
 from pyclad.data.datasets.inclad_bench_dataset import InCLADBenchDataset
@@ -226,14 +234,46 @@ from pyclad.data.datasets.inclad_bench_dataset import InCLADBenchDataset
 dataset = InCLADBenchDataset(benchmark="mvtec", root="/data/mvtec_ad")
 ```
 
-**Option B — per-benchmark environment variable:**
+On the command line this is `--root /data/mvtec_ad`.
+
+**2 — registry JSON:**
+
+A JSON object mapping benchmark names to roots:
+
+```json
+{
+    "mvtec": "/data/mvtec_ad",
+    "btech": "/data/BTech_Dataset_transformed",
+    "dagm":  "/data/DAGM_KaggleUpload",
+    "mpdd":  "/data/MPDD",
+    "visa":  "/data/VisA"
+}
+```
+
+The file is not shipped and has to be created. It is read from the `registry_path=`
+argument (`--registry-path` on the command line), else from the path in
+`PYCLAD_VISUAL_DATASETS_FILE`, else from
+`src/pyclad/data/datasets/visual_datasets/registry.json` (that directory is gitignored).
+It can be written by hand or with:
+
+```python
+from pyclad.data.readers.visual_dataset_registry import write_visual_dataset_registry
+
+write_visual_dataset_registry({"mvtec": "/data/mvtec_ad", "visa": "/data/VisA"})
+```
+
+An entry in the registry takes priority over the environment variables below.
+
+**3 — per-benchmark environment variable (MVTec and VisA only):**
 
 ```bash
 export PYCLAD_MVTEC_ROOT=/data/mvtec_ad
 export PYCLAD_VISA_ROOT=/data/VisA
 ```
 
-**Option C — shared root with auto-detection:**
+BTech, DAGM and MPDD have no per-benchmark variable; use option 1, 2 or 4.
+
+**4 — shared root with auto-detection:**
 
 The package looks for known subdirectory names inside `PYCLAD_VISUAL_DATASETS_ROOT`:
 
@@ -251,20 +291,6 @@ Recognised subdirectory names per benchmark:
 | `dagm`    | `DAGM_KaggleUpload`, `dagm_kaggleupload`, `dagm` |
 | `mpdd`    | `MPDD`, `mpdd` |
 | `visa`    | `visa`, `VisA` |
-
-**Option D — registry JSON:**
-
-Edit `src/pyclad/data/datasets/visual_datasets/registry.json`:
-
-```json
-{
-    "mvtec": "/data/mvtec_ad",
-    "btech": "/data/BTech_Dataset_transformed",
-    "dagm":  "/data/DAGM_KaggleUpload",
-    "mpdd":  "/data/MPDD",
-    "visa":  "/data/VisA"
-}
-```
 
 ### Step 3 — Load the dataset
 
@@ -301,9 +327,11 @@ python examples/clvad/run_continual_visual_ad.py \
 
 ## Manifest format
 
-Each HuggingFace split is a flat table with one row per image sample.
-The schema is identical to the local manifest CSV files in
-`src/pyclad/data/datasets/visual_datasets/manifests/`:
+Each HuggingFace split of
+[`lifelonglab/inclad-benchmark`](https://huggingface.co/datasets/lifelonglab/inclad-benchmark)
+is a flat table with one row per image sample (14 columns). The manifests are not
+shipped in this repository; `examples/visual_models/neurips_utilities/export_visual_benchmark_manifests.py`
+writes CSV files with the same schema from local copies of the datasets:
 
 | Column | Type | Description |
 |--------|------|-------------|

@@ -1,0 +1,7 @@
+rank,concept,avg_score,avg_rank,patchcore_score,padim_score,cfa_score,patchcore_rank,padim_rank,cfa_rank
+1,connector,0.864286,4.67,1.000000,0.821429,0.771429,6,5,3
+2,bracket_brown,0.828557,4.33,0.947964,0.762443,0.775264,5,4,4
+3,metal_plate,0.810581,3.67,0.942037,0.490249,0.999458,4,1,6
+4,bracket_white,0.753704,3.00,0.731111,0.853333,0.676667,1,6,2
+5,tubes,0.743508,3.00,0.817029,0.573822,0.839674,2,2,5
+6,bracket_black,0.679078,2.33,0.847074,0.640957,0.549202,3,3,1

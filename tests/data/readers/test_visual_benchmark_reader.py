@@ -55,6 +55,7 @@ def test_read_visual_benchmark_dataset_supports_mvtec_preset(tmp_path: Path):
     assert dataset.train_concepts()[0].data.shape == (1, 8, 8, 3)
     assert dataset.test_concepts()[0].data.shape == (2, 8, 8, 3)
     assert np.array_equal(dataset.test_concepts()[0].labels, np.array([1, 0]))
+    assert [sample.image_label for sample in dataset.test_samples_by_concept()["widget"]] == [1, 0]
 
     samples = index_visual_benchmark(root=root, benchmark=FolderBenchmarkSpec(name="mvtec"), categories=["widget"])
     assert samples[1].mask_path == root / "widget" / "ground_truth" / "crack" / "101_mask.png"

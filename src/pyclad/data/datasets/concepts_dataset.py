@@ -1,14 +1,24 @@
-from typing import List
+from typing import Any, List, Mapping, Optional, Sequence
 
 from pyclad.data.concept import Concept
 from pyclad.data.dataset import Dataset
 
 
 class ConceptsDataset(Dataset):
-    def __init__(self, name: str, train_concepts: List[Concept], test_concepts: List[Concept]):
+    def __init__(
+        self,
+        name: str,
+        train_concepts: List[Concept],
+        test_concepts: List[Concept],
+        test_samples_by_concept: Optional[Mapping[str, Sequence[Any]]] = None,
+    ):
         self._train_concepts = train_concepts
         self._test_concepts = test_concepts
         self._name = name
+        self._test_samples_by_concept = {
+            str(concept_name): list(samples)
+            for concept_name, samples in (test_samples_by_concept or {}).items()
+        }
 
     def train_concepts(self) -> List[Concept]:
         return self._train_concepts
@@ -18,6 +28,10 @@ class ConceptsDataset(Dataset):
 
     def name(self) -> str:
         return self._name
+
+    def test_samples_by_concept(self) -> dict[str, list[Any]]:
+        """Return exact test-sample metadata when supplied by a dataset reader."""
+        return {concept_name: list(samples) for concept_name, samples in self._test_samples_by_concept.items()}
 
     def additional_info(self):
         return {"tran_concepts_no": len(self._train_concepts), "test_concepts_no": len(self._test_concepts)}

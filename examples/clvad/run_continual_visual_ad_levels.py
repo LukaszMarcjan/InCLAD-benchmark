@@ -48,6 +48,9 @@ from pyclad.callbacks.evaluation.time_evaluation import TimeEvaluationCallback
 from pyclad.callbacks.evaluation.visual_pixel_concept_metric_callback import (
     VisualPixelConceptMetricCallback,
 )
+from pyclad.metrics.base.average_precision import AveragePrecision
+from pyclad.metrics.base.pixel_aupro import PixelAUPRO
+from pyclad.metrics.base.pixel_average_precision import PixelAveragePrecision
 from pyclad.metrics.base.pixel_dice_score import PixelDiceScore
 from pyclad.metrics.base.pixel_f1_score import PixelF1Score
 from pyclad.metrics.base.pixel_iou import PixelIoU
@@ -69,11 +72,13 @@ PIXEL_LEVEL_MODELS = {
     "efficientad",
     "fastflow",
     "ganomaly",
+    "one_for_more",
     "padim",
     "paste",
     "patchcore",
     "rd4ad",
     "stfpm",
+    "ucad",
 }
 
 
@@ -168,10 +173,19 @@ def build_callbacks(
             [
                 ConceptMetricCallback(base_metric=RocAuc(), metrics=continual_metrics),
                 ConceptMetricCallback(base_metric=F1Score(), metrics=continual_metrics),
+                ConceptMetricCallback(base_metric=AveragePrecision(), metrics=continual_metrics),
             ]
         )
 
     if args.eval_level in {"pixel", "both"}:
+        # Datasets that carry their own test samples (local readers, InCLAD-Bench,
+        # InCLAD-MD) are evaluated on exactly those samples, as in
+        # run_continual_visual_ad.py. Otherwise (empty map) the callback indexes
+        # the benchmark from disk as before.
+        test_samples_by_concept = None
+        samples_fn = getattr(dataset, "test_samples_by_concept", None)
+        if callable(samples_fn):
+            test_samples_by_concept = samples_fn() or None
         callbacks.append(
             VisualPixelConceptMetricCallback(
                 strategy=strategy,
@@ -182,6 +196,8 @@ def build_callbacks(
                 max_test_samples_per_category=args.max_test,
                 base_metrics=[
                     PixelRocAuc(),
+                    PixelAveragePrecision(),
+                    PixelAUPRO(),
                     PixelF1Score(threshold=args.pixel_threshold),
                     PixelDiceScore(threshold=args.pixel_threshold),
                     PixelIoU(threshold=args.pixel_threshold),
@@ -191,6 +207,7 @@ def build_callbacks(
                 threshold_mode=args.pixel_threshold_mode,
                 fixed_threshold=args.pixel_threshold,
                 threshold_quantile=args.pixel_threshold_quantile,
+                test_samples_by_concept=test_samples_by_concept,
             )
         )
 
@@ -324,7 +341,7 @@ def run_single(
                     ordering_metadata=ordering_metadata,
                 )
             )
-            run_payload["resolved_root"] = str(dataset_root)
+            run_payload["resolved_root"] = str(dataset_root) if dataset_root is not None else None
 
             logger.info("  Model device: %s", getattr(model, "_device", "unknown"))
             if hasattr(config, "show_training_progress"):
@@ -365,7 +382,8 @@ def run_single(
                 )
             )
 
-            scenario = ConceptIncrementalScenario(
+            scenario = _BASE.build_scenario(
+                strategy_name=args.strategy,
                 dataset=run_dataset,
                 strategy=strategy,
                 callbacks=callbacks,
@@ -405,6 +423,8 @@ def main() -> None:
         handlers=[logging.StreamHandler()],
     )
     logging.getLogger("pyclad.scenarios.concept_incremental").setLevel(logging.WARNING)
+    # InCLAD-MD aliases (e.g. the recorded "multidataset_seq_v1") -> "inclad-md".
+    is_inclad_md = _BASE.canonicalize_inclad_md_benchmark(args)
 
     if args.strategy == "ste" and args.n_runs > 1:
         logger.warning(
@@ -421,11 +441,24 @@ def main() -> None:
     spec = _BASE.MODEL_SPECS[args.model]
     resize = int(args.resize) if args.resize is not None else spec.default_resize
     resize_to = (resize, resize)
-    dataset_root = _BASE.resolve_visual_benchmark_root(
-        benchmark=args.benchmark,
-        root=args.root,
-        registry_path=args.registry_path,
-    )
+    if is_inclad_md:
+        # InCLAD-MD: --root (when given) is the directory holding the five source
+        # datasets. Without it, InCLADMDDataset resolves each source root from the
+        # registry / environment, so a missing 'inclad-md' entry is not an error.
+        try:
+            dataset_root = _BASE.resolve_visual_benchmark_root(
+                benchmark=args.benchmark,
+                root=args.root,
+                registry_path=args.registry_path,
+            )
+        except FileNotFoundError:
+            dataset_root = None
+    else:
+        dataset_root = _BASE.resolve_visual_benchmark_root(
+            benchmark=args.benchmark,
+            root=args.root,
+            registry_path=args.registry_path,
+        )
     logger.info("Dataset root: %s", dataset_root)
     logger.info(
         "Dataset options: categories=%s, resize=%s, max_train=%s, max_test=%s, eval_level=%s",
@@ -449,20 +482,12 @@ def main() -> None:
     dataset_load_started_at = time.perf_counter()
     if getattr(args, "inclad_bench", False):
         inclad_ordering = args.ordering_mode if args.ordering_mode else "easy_to_hard"
-        if args.benchmark == "inclad-md":
-            import os
-            from pyclad.data.datasets.inclad_md_dataset import InCLADMDDataset
-            logger.info("Loading InCLAD-MD manifest: ordering=%s", inclad_ordering)
-            os.environ["PYCLAD_VISUAL_DATASETS_ROOT"] = str(dataset_root)
-            dataset = InCLADMDDataset(
-                ordering=inclad_ordering,
-                registry_path=args.registry_path,
-                categories=args.categories,
-                data_mode="numpy",
+        if is_inclad_md:
+            dataset = _BASE.load_inclad_md_dataset(
+                args,
                 resize_to=resize_to,
-                color_mode="rgb",
-                max_train_samples_per_category=args.max_train,
-                max_test_samples_per_category=args.max_test,
+                ordering=inclad_ordering,
+                datasets_root=dataset_root,
             )
         else:
             from pyclad.data.datasets.inclad_bench_dataset import InCLADBenchDataset

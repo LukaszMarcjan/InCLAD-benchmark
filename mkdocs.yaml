@@ -6,18 +6,12 @@ theme:
     - navigation.expand
     - content.code.copy
 nav:
-  - Introduction: index.md
-  - Getting started: 'getting_started.md'
-  - Examples: 'examples.md'
-  - Components:
-    - Callbacks: 'callbacks.md'
-    - InfoProvider: 'infoprovider.md'
-    - Datasets: 'datasets.md'
-    - Metrics: 'metrics.md'
-    - Models: 'models.md'
-    - Scenarios: 'scenarios.md'
-    - Strategies: 'strategies.md'
-  - How to contribute?: 'contribution.md'
+  - InCLAD-Bench dataset: 'inclad-bench-dataset.md'
+  - InCLAD-MD dataset: 'inclad-md-dataset.md'
+  - Baselines:
+    - UCAD: 'ucad.md'
+    - CDAD (One-for-More): 'one-for-more.md'
+    - ReplayCAD: 'replaycad.md'
 plugins:
   - search
   - mkdocstrings:

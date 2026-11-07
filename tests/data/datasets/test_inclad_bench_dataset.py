@@ -197,6 +197,31 @@ def test_inclad_bench_dataset_loads_from_manifest(tmp_path: Path):
 
     assert dataset.test_concepts()[0].labels is not None
     assert 1 in dataset.test_concepts()[0].labels
+    assert [
+        sample.image_path.name for sample in dataset.test_samples_by_concept()["widget"]
+    ] == ["100.png", "101.png"]
+    assert dataset.test_samples_by_concept()["widget"][1].mask_path is not None
+
+
+def test_inclad_bench_treats_pandas_nan_as_an_empty_optional_path(tmp_path: Path):
+    root = tmp_path / "mvtec_root"
+    fake_df = _build_fake_hf_manifest(root, benchmark="mvtec")
+    fake_df.loc[fake_df["mask_relpath"] == "", "mask_relpath"] = np.nan
+    fake_df.loc[fake_df["defect_type"] == "", "defect_type"] = np.nan
+
+    with patch(
+        "pyclad.data.datasets.inclad_bench_dataset.load_dataset",
+        return_value=_FakeHFDataset(fake_df),
+    ):
+        dataset = InCLADBenchDataset(
+            benchmark="mvtec",
+            ordering="easy_to_hard",
+            root=root,
+            resize_to=(8, 8),
+        )
+
+    assert len(dataset.train_concepts()) == 2
+    assert dataset.test_concepts()[0].labels.tolist() == [0, 1]
 
 
 def test_inclad_bench_category_filtering(tmp_path: Path):

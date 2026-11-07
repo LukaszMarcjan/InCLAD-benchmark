@@ -55,7 +55,8 @@ def parse_args() -> argparse.Namespace:
         "--continual-memory-bank-size",
         type=int,
         default=None,
-        help="Explicit PatchCore CL memory-bank budget. Defaults to replay-buffer-derived size.",
+        help="Forwarded to PatchCore runs, where it is recorded in run_config only; PatchCore CL budgets "
+        "history as previous_ratio x |current-task coreset| with previous_ratio fixed at 0.25.",
     )
     extra_args, remaining = extra_parser.parse_known_args()
 

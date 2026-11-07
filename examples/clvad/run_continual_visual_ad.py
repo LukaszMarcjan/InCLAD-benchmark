@@ -16,7 +16,7 @@ Replay with PaSTe:
         --pretrained \
         --epochs 50 \
         --batch-size 32 \
-        --replay-buffer-size 100
+        --replay-buffer-fraction 0.2
 
 Naive continual training with CFA:
     python examples/clvad/run_continual_visual_ad.py \
@@ -76,6 +76,7 @@ from pyclad.data.readers.visual_dataset_registry import (
     resolve_visual_benchmark_root,
 )
 from pyclad.data.readers.visual_dataset_ordering import resolve_benchmark_ordering_path
+from pyclad.metrics.base.average_precision import AveragePrecision
 from pyclad.metrics.base.f1_score import F1Score
 from pyclad.metrics.base.roc_auc import RocAuc
 from pyclad.metrics.continual.average_continual import ContinualAverage
@@ -84,6 +85,7 @@ from pyclad.metrics.continual.diagonal_average import DiagonalAverage
 from pyclad.metrics.continual.forward_transfer import ForwardTransfer
 from pyclad.models.model import Model
 from pyclad.output.output_writer import InfoProvider
+from pyclad.scenarios.concept_aware import ConceptAwareScenario
 from pyclad.scenarios.concept_incremental import ConceptIncrementalScenario
 from pyclad.strategies.baselines.cumulative import CumulativeStrategy
 from pyclad.strategies.baselines.naive import NaiveStrategy
@@ -130,6 +132,13 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         "GANomalyConfig",
         256,
     ),
+    "one_for_more": ModelSpec(
+        "pyclad.models.one_for_more.one_for_more",
+        "OneForMore",
+        "pyclad.models.one_for_more.config",
+        "OneForMoreConfig",
+        256,
+    ),
     "padim": ModelSpec("pyclad.models.padim.padim", "PaDiM", "pyclad.models.padim.config", "PaDiMConfig", 224),
     "paste": ModelSpec("pyclad.models.paste.paste", "PaSTe", "pyclad.models.paste.config", "PaSTeConfig", 224),
     "patchcore": ModelSpec(
@@ -141,13 +150,21 @@ MODEL_SPECS: dict[str, ModelSpec] = {
     ),
     "rd4ad": ModelSpec("pyclad.models.rd4ad.rd4ad", "RD4AD", "pyclad.models.rd4ad.config", "RD4ADConfig", 224),
     "stfpm": ModelSpec("pyclad.models.stfpm.stfpm", "STFPM", "pyclad.models.stfpm.config", "STFPMConfig", 256),
-    "unet": ModelSpec(
-        "pyclad.models.unet.unet",
-        "UNet",
-        "pyclad.models.unet.config",
-        "ReconstructionConfig",
-        256,
+    "ucad": ModelSpec(
+        "pyclad.models.ucad.ucad",
+        "UCAD",
+        "pyclad.models.ucad.config",
+        "UCADConfig",
+        224,
     ),
+    # Not offered: pyclad.models.unet is not part of this release and the paper evaluates no UNet.
+    # "unet": ModelSpec(
+    #     "pyclad.models.unet.unet",
+    #     "UNet",
+    #     "pyclad.models.unet.config",
+    #     "ReconstructionConfig",
+    #     256,
+    # ),
 }
 
 
@@ -474,12 +491,18 @@ def parse_args() -> argparse.Namespace:
         "--strategy",
         type=str,
         default="replay",
-        choices=["naive", "cumulative", "replay", "ste"],
+        choices=["naive", "cumulative", "replay", "replaycad", "ste", "ucad"],
         help="Continual-learning strategy",
     )
 
     ds = parser.add_argument_group("dataset")
-    ds.add_argument("--benchmark", type=str, default="mvtec", help="Benchmark name")
+    ds.add_argument(
+        "--benchmark",
+        type=str,
+        default="mvtec",
+        help="Benchmark name. 'inclad-md' (aliases: inclad_md, multidataset, multidataset_seq_v1) "
+        "loads the InCLAD-MD stream and requires --inclad-bench",
+    )
     ds.add_argument("--root", type=str, default=None, help="Path to the benchmark root directory")
     ds.add_argument("--registry-path", type=str, default=None, help="Optional visual dataset registry JSON path")
     ds.add_argument("--categories", type=str, nargs="*", default=None, help="Categories to use (default: all)")
@@ -517,7 +540,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Load the dataset manifest from the InCLAD-Bench HuggingFace repository "
-        "(anonmllab/inclad-bench) instead of reading from local folder structure. "
+        "(lifelonglab/inclad-benchmark) instead of reading from local folder structure. "
         "Images must still be available locally (--root or registry). "
         "When set, --ordering-mode selects the InCLAD ordering split "
         "(easy_to_hard, hard_to_easy); defaults to easy_to_hard.",
@@ -557,6 +580,12 @@ def parse_args() -> argparse.Namespace:
     )
     md.add_argument("--batch-size", type=int, default=None, help="Training batch size override")
     md.add_argument("--epochs", type=int, default=None, help="Training epochs override")
+    md.add_argument(
+        "--incremental-epochs",
+        type=int,
+        default=None,
+        help="Incremental-task epoch override for models that distinguish base and incremental training",
+    )
     md.add_argument("--device", type=str, default=None, help="Torch device override")
     md.add_argument("--threshold-quantile", type=float, default=None, help="Threshold quantile override")
     md.add_argument(
@@ -605,7 +634,130 @@ def parse_args() -> argparse.Namespace:
     ex.add_argument("--master-seed", type=int, default=42, help="Master seed for per-run seed generation")
     ex.add_argument("--output-dir", type=str, default=None, help="Directory for result JSON and logs")
 
-    return parser.parse_args()
+    ev = parser.add_argument_group("evaluation")
+    ev.add_argument(
+        "--eval-level",
+        choices=["image", "pixel", "both"],
+        default="image",
+        help="Evaluation granularity. The default preserves the original image-level runner behavior.",
+    )
+    ev.add_argument(
+        "--pixel-skip-missing-masks",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Skip anomalous test samples without pixel-level ground-truth masks",
+    )
+    ev.add_argument(
+        "--pixel-threshold",
+        type=float,
+        default=0.5,
+        help="Fixed threshold for pixel F1, Dice, and IoU",
+    )
+    ev.add_argument(
+        "--pixel-threshold-mode",
+        choices=["fixed", "train-quantile"],
+        default="fixed",
+        help="Threshold selection for pixel F1, Dice, and IoU",
+    )
+    ev.add_argument(
+        "--pixel-threshold-quantile",
+        type=float,
+        default=0.995,
+        help="Seen-normal-train score quantile used by train-quantile pixel thresholding",
+    )
+
+    rc = parser.add_argument_group("ReplayCAD (optional)")
+    rc.add_argument(
+        "--replaycad-mask-backend",
+        choices=["sam", "precomputed", "full-frame"],
+        default="sam",
+        help="Mask source. full-frame is intended only for smoke tests and ablations.",
+    )
+    rc.add_argument("--replaycad-sam-checkpoint", type=str, default=None, help="Path to a SAM checkpoint")
+    rc.add_argument(
+        "--replaycad-sam-model-type",
+        choices=["vit_h", "vit_l", "vit_b"],
+        default="vit_h",
+        help="SAM architecture matching the checkpoint",
+    )
+    rc.add_argument(
+        "--replaycad-mask-root",
+        type=str,
+        default=None,
+        help="Root with <concept>/*.png masks when using the precomputed backend",
+    )
+    rc.add_argument(
+        "--replaycad-artifact-dir",
+        type=str,
+        default=None,
+        help="Optional root for conditional artifacts; each run receives a separate subdirectory",
+    )
+    rc.add_argument(
+        "--replaycad-compression-steps",
+        type=int,
+        default=None,
+        help="Override paper-preset condition optimization steps",
+    )
+    rc.add_argument(
+        "--replaycad-inference-steps",
+        type=int,
+        default=None,
+        help="Override paper-preset diffusion inference steps (default: 50)",
+    )
+    rc.add_argument(
+        "--replaycad-samples-per-concept",
+        type=int,
+        default=800,
+        help="Historical images generated for every previous concept",
+    )
+    rc.add_argument(
+        "--replaycad-masks-per-concept",
+        type=int,
+        default=5,
+        help="Spatial masks stored for every compressed concept (paper range: 1-10)",
+    )
+    rc.add_argument(
+        "--replaycad-compression-batch-size",
+        type=int,
+        default=None,
+        help="Override preset batch size (MVTec: 16, VisA: 2)",
+    )
+    rc.add_argument(
+        "--replaycad-generation-batch-size",
+        type=int,
+        default=None,
+        help="Override preset generation batch size (MVTec: 8, VisA: 2)",
+    )
+    rc.add_argument(
+        "--replaycad-device",
+        type=str,
+        default=None,
+        help="Diffusion/SAM device; defaults to --device or cuda",
+    )
+    rc.add_argument(
+        "--replaycad-dtype",
+        choices=["float32", "float16", "bfloat16"],
+        default="float32",
+    )
+    rc.add_argument(
+        "--replaycad-local-files-only",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Do not download diffusion weights; require a populated local Hugging Face cache",
+    )
+    rc.add_argument(
+        "--replaycad-cache-generated",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Persist generated replay images (excluded from conditional-memory reporting)",
+    )
+
+    args = parser.parse_args()
+    if not 0.0 < float(args.pixel_threshold_quantile) < 1.0:
+        parser.error(
+            f"--pixel-threshold-quantile must be in (0, 1), got {args.pixel_threshold_quantile}"
+        )
+    return args
 
 
 def default_results_root() -> pathlib.Path:
@@ -770,6 +922,8 @@ def ordering_output_suffix(args: argparse.Namespace) -> str:
 
 
 def replay_buffer_file_suffix(args: argparse.Namespace) -> str:
+    if args.strategy == "replaycad":
+        return f"_rc-{_slugify_label_fragment(args.benchmark)}"
     if args.strategy != "replay":
         return ""
     return f"_buf-frac{_slugify_float(args.replay_buffer_fraction)}"
@@ -793,12 +947,34 @@ def generate_seeds(master_seed: int, n_runs: int) -> list[int]:
     return [int(seed) for seed in rng.integers(0, 2**31 - 1, size=n_runs)]
 
 
-def set_global_seeds(seed: int) -> None:
+# determinism: original signature kept for reference --
+# def set_global_seeds(seed: int) -> None:
+def set_global_seeds(seed: int, deterministic: bool = False) -> None:
+    """Seed every global generator; optionally pin the deterministic backends.
+
+    ``deterministic`` defaults to False so every existing configuration behaves
+    exactly as before. It has to default off: deterministic cuDNN kernels can
+    produce different numbers from the non-deterministic ones the archive was
+    computed with, which would break "run 0 reproduces the archive" - the one
+    free regression test this project has.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+    # determinism: added -- opt-in, see models/vision/determinism.py
+    if deterministic:
+        from pyclad.models.vision.determinism import enable_determinism
+
+        report = enable_determinism()
+        logger.info("Determinism pinned: %s", report)
+        if not report.get("cublas_workspace_config_env_set"):
+            logger.warning(
+                "CUBLAS_WORKSPACE_CONFIG is not set, so this run is not fully "
+                "deterministic. Export CUBLAS_WORKSPACE_CONFIG=:4096:8 before "
+                "python starts; it cannot be set from inside the process."
+            )
 
 
 def shuffle_dataset(dataset: ConceptsDataset, seed: int) -> ConceptsDataset:
@@ -811,6 +987,7 @@ def shuffle_dataset(dataset: ConceptsDataset, seed: int) -> ConceptsDataset:
         name=dataset.name(),
         train_concepts=list(train_concepts),
         test_concepts=list(test_concepts),
+        test_samples_by_concept=dataset.test_samples_by_concept(),
     )
 
 
@@ -821,6 +998,7 @@ def reorder_dataset(dataset: ConceptsDataset, concept_order: list[str]) -> Conce
         name=dataset.name(),
         train_concepts=[train_by_name[name] for name in concept_order],
         test_concepts=[test_by_name[name] for name in concept_order],
+        test_samples_by_concept=dataset.test_samples_by_concept(),
     )
 
 
@@ -1044,20 +1222,76 @@ def _duplicates(values: list[str]) -> list[str]:
     return duplicates
 
 
-def build_callbacks(dataset: ConceptsDataset):
-    return [
-        ScenarioProgressCallback(dataset),
-        ConceptMetricCallback(
-            base_metric=RocAuc(),
-            metrics=[ContinualAverage(), BackwardTransfer(), ForwardTransfer(), DiagonalAverage()],
-        ),
-        ConceptMetricCallback(
-            base_metric=F1Score(),
-            metrics=[ContinualAverage(), BackwardTransfer(), ForwardTransfer(), DiagonalAverage()],
-        ),
-        TimeEvaluationCallback(),
-        MemoryUsageCallback(),
-    ]
+def build_callbacks(
+    dataset: ConceptsDataset,
+    strategy: Any | None = None,
+    args: argparse.Namespace | None = None,
+):
+    eval_level = getattr(args, "eval_level", "image")
+    callbacks: list[Callback] = [ScenarioProgressCallback(dataset)]
+
+    if eval_level in {"image", "both"}:
+        callbacks.extend(
+            [
+                ConceptMetricCallback(
+                    base_metric=RocAuc(),
+                    metrics=[ContinualAverage(), BackwardTransfer(), ForwardTransfer(), DiagonalAverage()],
+                ),
+                ConceptMetricCallback(
+                    base_metric=F1Score(),
+                    metrics=[ContinualAverage(), BackwardTransfer(), ForwardTransfer(), DiagonalAverage()],
+                ),
+                ConceptMetricCallback(
+                    base_metric=AveragePrecision(),
+                    metrics=[ContinualAverage(), BackwardTransfer(), ForwardTransfer(), DiagonalAverage()],
+                ),
+            ]
+        )
+
+    if eval_level in {"pixel", "both"}:
+        if strategy is None or args is None:
+            raise ValueError("Pixel-level evaluation requires the active strategy and parsed runner arguments")
+
+        from pyclad.callbacks.evaluation.visual_pixel_concept_metric_callback import (
+            VisualPixelConceptMetricCallback,
+        )
+        from pyclad.metrics.base.pixel_aupro import PixelAUPRO
+        from pyclad.metrics.base.pixel_average_precision import PixelAveragePrecision
+        from pyclad.metrics.base.pixel_dice_score import PixelDiceScore
+        from pyclad.metrics.base.pixel_f1_score import PixelF1Score
+        from pyclad.metrics.base.pixel_iou import PixelIoU
+        from pyclad.metrics.base.pixel_roc_auc import PixelRocAuc
+
+        test_samples_by_concept = dataset.test_samples_by_concept()
+        if not test_samples_by_concept and dataset.test_concepts():
+            test_samples_by_concept = None
+        callbacks.append(
+            VisualPixelConceptMetricCallback(
+                strategy=strategy,
+                benchmark=args.benchmark,
+                root=args.root,
+                registry_path=args.registry_path,
+                categories=args.categories,
+                max_test_samples_per_category=args.max_test,
+                base_metrics=[
+                    PixelRocAuc(),
+                    PixelAveragePrecision(),
+                    PixelAUPRO(),
+                    PixelF1Score(threshold=args.pixel_threshold),
+                    PixelDiceScore(threshold=args.pixel_threshold),
+                    PixelIoU(threshold=args.pixel_threshold),
+                ],
+                metrics=[ContinualAverage(), BackwardTransfer(), ForwardTransfer(), DiagonalAverage()],
+                skip_missing_anomaly_masks=args.pixel_skip_missing_masks,
+                threshold_mode=args.pixel_threshold_mode,
+                fixed_threshold=args.pixel_threshold,
+                threshold_quantile=args.pixel_threshold_quantile,
+                test_samples_by_concept=test_samples_by_concept,
+            )
+        )
+
+    callbacks.extend([TimeEvaluationCallback(), MemoryUsageCallback()])
+    return callbacks
 
 
 def load_config_overrides(args: argparse.Namespace) -> dict[str, Any]:
@@ -1116,6 +1350,7 @@ def build_model_config(args: argparse.Namespace, seed: int):
     map_override("device", args.device, "device")
     map_override("batch_size", args.batch_size, "batch_size")
     map_override("epochs", args.epochs, "epochs")
+    map_override("incremental_epochs", getattr(args, "incremental_epochs", None), "incremental_epochs")
     map_override("threshold_quantile", args.threshold_quantile, "threshold_quantile")
     map_override("show_training_progress", args.show_training_progress, "show_training_progress")
     map_override("variant", args.variant, "variant")
@@ -1182,7 +1417,17 @@ def build_strategy(
     model: Model,
     model_creation_fn: Callable[[], Model],
     replay_buffer_size: int = 0,
+    replaycad_config=None,
 ):
+    if strategy_name == "ucad":
+        from pyclad.models.ucad.ucad import UCAD
+        from pyclad.strategies.vision.ucad import UCADStrategy
+
+        if not isinstance(model, UCAD):
+            raise ValueError(f"Strategy 'ucad' requires --model ucad, got {type(model).__name__}")
+        return UCADStrategy(model)
+    if isinstance(model, _load_attr("pyclad.models.ucad.ucad", "UCAD")):
+        raise ValueError("Model 'ucad' must be used with --strategy ucad")
     if strategy_name == "naive":
         return NaiveStrategy(model)
     if strategy_name == "cumulative":
@@ -1197,9 +1442,109 @@ def build_strategy(
             max_size=replay_buffer_size,
         )
         return ReplayEnhancedStrategy(model, replay_buffer)
+    if strategy_name == "replaycad":
+        if replaycad_config is None:
+            raise ValueError("ReplayCAD configuration is required for strategy='replaycad'")
+        from pyclad.strategies.replaycad import ReplayCADMemory, ReplayCADStrategy
+
+        return ReplayCADStrategy(model=model, memory=ReplayCADMemory(replaycad_config))
     if strategy_name == "ste":
         return SingleTaskExpertStrategy(model=model, model_creation_fn=model_creation_fn)
     raise ValueError(f"Unknown strategy: {strategy_name}")
+
+
+def build_scenario(
+    strategy_name: str,
+    dataset: ConceptsDataset,
+    strategy,
+    callbacks: list[Callback],
+):
+    if strategy_name in {"replaycad", "ucad"}:
+        return ConceptAwareScenario(dataset=dataset, strategy=strategy, callbacks=callbacks)
+    return ConceptIncrementalScenario(dataset=dataset, strategy=strategy, callbacks=callbacks)
+
+
+def normalize_replaycad_args(args: argparse.Namespace) -> argparse.Namespace:
+    """Apply the ReplayCAD benchmark contract."""
+    if args.strategy != "replaycad":
+        return args
+    if args.model != "patchcore":
+        raise ValueError("The first ReplayCAD integration supports only --model patchcore")
+    if args.benchmark.lower() not in {"btech", "dagm", "mpdd", "mvtec", "visa"}:
+        raise ValueError(
+            "ReplayCAD supports InCLAD benchmarks: btech, dagm, mpdd, mvtec, visa"
+        )
+    if not args.inclad_bench:
+        raise ValueError("ReplayCAD benchmark runs currently require --inclad-bench")
+    if args.ordering_mode not in {None, "easy_to_hard", "hard_to_easy", "random"}:
+        raise ValueError(
+            "ReplayCAD supports --ordering-mode easy_to_hard, hard_to_easy, or random"
+        )
+    supported_backbones = {"resnet18", "wide_resnet50_2"}
+    if args.backbone is not None and args.backbone not in supported_backbones:
+        raise ValueError(
+            "ReplayCAD+PatchCore supports --backbone resnet18 or wide_resnet50_2; "
+            f"got {args.backbone!r}"
+        )
+    if args.pretrained is False:
+        raise ValueError("ReplayCAD+PatchCore requires a pretrained backbone")
+    if args.replaycad_mask_backend == "sam" and args.replaycad_sam_checkpoint is None:
+        raise ValueError("--replaycad-sam-checkpoint is required with --replaycad-mask-backend sam")
+    if args.replaycad_mask_backend == "precomputed" and args.replaycad_mask_root is None:
+        raise ValueError("--replaycad-mask-root is required with --replaycad-mask-backend precomputed")
+
+    if args.ordering_mode is None:
+        args.ordering_mode = "easy_to_hard"
+    if args.backbone is None:
+        args.backbone = "wide_resnet50_2"
+    args.pretrained = True
+    if args.resize is None:
+        args.resize = 256
+    return args
+
+
+def build_replaycad_config(args: argparse.Namespace, seed: int, output_path: pathlib.Path):
+    if args.strategy != "replaycad":
+        return None
+    from pyclad.strategies.replaycad.config import ReplayCADConfig
+
+    if args.replaycad_artifact_dir is None:
+        artifact_dir = output_path.parent / f"{output_path.stem}_artifacts"
+    else:
+        artifact_dir = pathlib.Path(args.replaycad_artifact_dir) / output_path.stem
+    device = args.replaycad_device or args.device or "cuda"
+    config = ReplayCADConfig.paper_preset(
+        benchmark=args.benchmark,
+        artifact_dir=artifact_dir,
+        sam_checkpoint=(
+            pathlib.Path(args.replaycad_sam_checkpoint) if args.replaycad_sam_checkpoint is not None else None
+        ),
+        precomputed_mask_root=(
+            pathlib.Path(args.replaycad_mask_root) if args.replaycad_mask_root is not None else None
+        ),
+        mask_backend=args.replaycad_mask_backend,
+        device=device,
+        seed=seed,
+        compression_steps=args.replaycad_compression_steps,
+        replay_samples_per_concept=args.replaycad_samples_per_concept,
+        masks_per_concept=args.replaycad_masks_per_concept,
+        local_files_only=args.replaycad_local_files_only,
+    )
+    payload = config.model_dump(mode="python")
+    payload.update(
+        {
+            "sam_model_type": args.replaycad_sam_model_type,
+            "torch_dtype": args.replaycad_dtype,
+            "cache_generated": args.replaycad_cache_generated,
+        }
+    )
+    if args.replaycad_compression_batch_size is not None:
+        payload["compression_batch_size"] = args.replaycad_compression_batch_size
+    if args.replaycad_generation_batch_size is not None:
+        payload["generation_batch_size"] = args.replaycad_generation_batch_size
+    if args.replaycad_inference_steps is not None:
+        payload["inference_steps"] = args.replaycad_inference_steps
+    return ReplayCADConfig.model_validate(payload)
 
 
 def create_run_config_payload(
@@ -1309,6 +1654,11 @@ def run_single(
             logger.info("  [2/5] Building model and effective configuration")
             model_factory = lambda: build_model(args, seed)[0]
             model, config = build_model(args, seed)
+            if args.eval_level in {"pixel", "both"} and not callable(getattr(model, "score_maps", None)):
+                raise ValueError(
+                    f"Model '{args.model}' does not expose score_maps(), so --eval-level {args.eval_level} "
+                    "is unavailable"
+                )
             run_payload.update(
                 create_run_config_payload(
                     args=args,
@@ -1344,13 +1694,17 @@ def run_single(
                 replay_buffer_size = resolve_replay_buffer_size(args, run_dataset)
                 run_payload["replay_buffer_fraction"] = args.replay_buffer_fraction
                 run_payload["replay_buffer_size"] = replay_buffer_size
+            replaycad_config = build_replaycad_config(args=args, seed=seed, output_path=output_path)
+            if replaycad_config is not None:
+                run_payload["replaycad_config"] = replaycad_config.model_dump(mode="json")
             strategy = build_strategy(
                 args.strategy,
                 model,
                 model_factory,
                 replay_buffer_size,
+                replaycad_config,
             )
-            callbacks = build_callbacks(run_dataset)
+            callbacks = build_callbacks(run_dataset, strategy=strategy, args=args)
             callbacks.append(
                 JsonCheckpointCallback(
                     output_path=output_path,
@@ -1359,7 +1713,8 @@ def run_single(
                 )
             )
 
-            scenario = ConceptIncrementalScenario(
+            scenario = build_scenario(
+                strategy_name=args.strategy,
                 dataset=run_dataset,
                 strategy=strategy,
                 callbacks=callbacks,
@@ -1407,6 +1762,98 @@ def _load_attr(module_name: str, attr_name: str):
     return getattr(module, attr_name)
 
 
+# --------------------------------------------------------------------- InCLAD-MD
+# InCLAD-MD is the 27-concept multi-dataset stream (concepts "<dataset>__<category>")
+# published as the "inclad-md" config of the InCLAD HuggingFace repository. The
+# paper's MD result files record it as benchmark "multidataset_seq_v1". That name
+# and the other spellings accepted by _inclad_md_pixel.is_inclad_md ("inclad_md",
+# "multidataset", ...) all load the same stream through InCLADMDDataset, which
+# requires --inclad-bench. With --inclad-bench the curriculum comes from the
+# manifest split selected by --ordering-mode; --ordering-dir/--ordering-file are
+# not read.
+INCLAD_MD_BENCHMARK = "inclad-md"
+
+
+def _inclad_md_helpers():
+    import sys
+
+    helper_dir = str(pathlib.Path(__file__).resolve().parent)
+    if helper_dir not in sys.path:
+        sys.path.insert(0, helper_dir)
+    import _inclad_md_pixel
+
+    return _inclad_md_pixel
+
+
+def is_inclad_md_benchmark(name: Any) -> bool:
+    return bool(_inclad_md_helpers().is_inclad_md(name))
+
+
+def canonicalize_inclad_md_benchmark(args: argparse.Namespace) -> bool:
+    """Map any InCLAD-MD benchmark alias onto ``inclad-md``.
+
+    Returns True when the run is an InCLAD-MD run. Other benchmark names are
+    left untouched. The requested spelling is kept in ``args.benchmark_alias``.
+    """
+    requested = getattr(args, "benchmark", None)
+    if not is_inclad_md_benchmark(requested):
+        return False
+    if requested != INCLAD_MD_BENCHMARK:
+        logger.info(
+            "Benchmark '%s' is an alias of '%s'; loading it through InCLADMDDataset.",
+            requested,
+            INCLAD_MD_BENCHMARK,
+        )
+        args.benchmark_alias = requested
+        args.benchmark = INCLAD_MD_BENCHMARK
+    if not getattr(args, "inclad_bench", False):
+        raise SystemExit(
+            f"Benchmark '{requested}' is the InCLAD-MD stream, which is loaded from the InCLAD "
+            "HuggingFace manifest: add --inclad-bench (images are read from the five local source datasets)."
+        )
+    return True
+
+
+def load_inclad_md_dataset(
+    args: argparse.Namespace,
+    resize_to: tuple[int, int],
+    ordering: str,
+    datasets_root: str | pathlib.Path | None = None,
+) -> ConceptsDataset:
+    """Load InCLAD-MD and make pixel-level mask indexing work for it.
+
+    ``datasets_root`` is the directory holding the five source datasets; when
+    given it is exported as PYCLAD_VISUAL_DATASETS_ROOT, which InCLADMDDataset
+    uses to resolve each source root. The pixel callbacks use the dataset's own
+    test samples when it provides them; the manifest-based mask indexer
+    installed here covers the case where it does not.
+    """
+    from pyclad.data.datasets.inclad_md_dataset import InCLADMDDataset
+
+    if datasets_root is not None:
+        os.environ["PYCLAD_VISUAL_DATASETS_ROOT"] = str(datasets_root)
+    if getattr(args, "ordering_file", None):
+        logger.warning(
+            "--ordering-file is ignored for InCLAD-MD with --inclad-bench; the '%s' manifest split is used.",
+            ordering,
+        )
+
+    os.environ["INCLAD_MD_ORDERING"] = str(ordering)
+    _inclad_md_helpers().install()
+
+    logger.info("Loading InCLAD-MD manifest: ordering=%s", ordering)
+    return InCLADMDDataset(
+        ordering=ordering,
+        registry_path=args.registry_path,
+        categories=args.categories,
+        data_mode="numpy",
+        resize_to=resize_to,
+        color_mode="rgb",
+        max_train_samples_per_category=args.max_train,
+        max_test_samples_per_category=args.max_test,
+    )
+
+
 if __name__ == "__main__":
     args = parse_args()
 
@@ -1416,6 +1863,8 @@ if __name__ == "__main__":
         handlers=[logging.StreamHandler()],
     )
     logging.getLogger("pyclad.scenarios.concept_incremental").setLevel(logging.WARNING)
+    is_inclad_md = canonicalize_inclad_md_benchmark(args)
+    args = normalize_replaycad_args(args)
 
     if args.strategy == "ste" and args.n_runs > 1:
         logger.warning(
@@ -1441,10 +1890,25 @@ if __name__ == "__main__":
     )
     if args.strategy == "replay":
         logger.info("Replay buffer fraction: %.2f", args.replay_buffer_fraction)
+    elif args.strategy == "replaycad":
+        logger.info(
+            "ReplayCAD: benchmark=%s, ordering=%s, detector=PatchCore, backbone=%s, eval=%s",
+            args.benchmark,
+            args.ordering_mode,
+            args.backbone,
+            args.eval_level,
+        )
 
     dataset_load_started_at = time.perf_counter()
 
-    if args.inclad_bench:
+    if args.inclad_bench and is_inclad_md:
+        dataset = load_inclad_md_dataset(
+            args,
+            resize_to=resize_to,
+            ordering=args.ordering_mode if args.ordering_mode else "easy_to_hard",
+            datasets_root=args.root,
+        )
+    elif args.inclad_bench:
         from pyclad.data.datasets.inclad_bench_dataset import InCLADBenchDataset
 
         inclad_ordering = args.ordering_mode if args.ordering_mode else "easy_to_hard"

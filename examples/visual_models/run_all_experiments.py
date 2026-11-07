@@ -90,7 +90,7 @@ DEFAULT_ORDERING_DIR = SCRIPT_DIR / "ordering"
 BATCH_LOG_FILENAME = "run_all_experiments.log"
 LOG_FORMAT = "%(asctime)s  %(levelname)-8s  %(message)s"
 
-SUPPORTED_MODELS = (
+DEFAULT_MODELS = (
     "cfa",
     "draem",
     "efficientad",
@@ -101,8 +101,9 @@ SUPPORTED_MODELS = (
     "patchcore",
     "rd4ad",
     "stfpm",
-    "unet",
+    # "unet",  # not offered: pyclad.models.unet is not part of this release
 )
+SUPPORTED_MODELS = (*DEFAULT_MODELS, "one_for_more")
 SUPPORTED_STRATEGIES = ("naive", "replay", "cumulative", "ste", "cl")
 DEFAULT_STRATEGIES = ("naive", "replay", "cumulative")
 CL_STRATEGY_MODELS = ("cfa", "padim", "patchcore")
@@ -113,6 +114,7 @@ PIXEL_LEVEL_MODELS = (
     "efficientad",
     "fastflow",
     "ganomaly",
+    "one_for_more",
     "padim",
     "paste",
     "patchcore",
@@ -137,7 +139,7 @@ def parse_args() -> argparse.Namespace:
         "--models",
         type=str,
         nargs="+",
-        default=list(SUPPORTED_MODELS),
+        default=list(DEFAULT_MODELS),
         help=f"Models to run. Available: {', '.join(SUPPORTED_MODELS)}",
     )
     parser.add_argument(
@@ -180,7 +182,7 @@ def parse_args() -> argparse.Namespace:
         "--inclad-bench",
         action="store_true",
         default=False,
-        help="Load manifests from the InCLAD-Bench HuggingFace repository (anonmllab/inclad-bench) "
+        help="Load manifests from the InCLAD-Bench HuggingFace repository (lifelonglab/inclad-benchmark) "
         "instead of discovering local folder structure. Images must still be available locally.",
     )
     ds.add_argument("--categories", type=str, nargs="*", default=None, help="Categories to use (default: all)")
@@ -252,6 +254,12 @@ def parse_args() -> argparse.Namespace:
     )
     md.add_argument("--batch-size", type=int, default=None, help="Training batch size override")
     md.add_argument("--epochs", type=int, default=None, help="Training epochs override")
+    md.add_argument(
+        "--incremental-epochs",
+        type=int,
+        default=None,
+        help="Incremental-task epoch override for models that distinguish base and incremental training",
+    )
     md.add_argument("--device", type=str, default=None, help="Torch device override")
     md.add_argument("--threshold-quantile", type=float, default=None, help="Threshold quantile override")
     md.add_argument(
@@ -524,7 +532,8 @@ def build_command(
     args: argparse.Namespace,
 ) -> list[str]:
     runner_path = CLVAD_CL_RUNNER if strategy == "cl" else CLVAD_RUNNER
-    output_dir = Path(args.output_root) / model / benchmark / strategy
+    single_job = len(args.models) == 1 and len(args.strategies) == 1 and len(args.benchmarks or []) == 1
+    output_dir = Path(args.output_root) if single_job else Path(args.output_root) / model / benchmark / strategy
     command = [
         sys.executable,
         str(runner_path),
@@ -557,6 +566,7 @@ def build_command(
     _append_optional(command, "--backbone", args.backbone)
     _append_optional(command, "--batch-size", args.batch_size)
     _append_optional(command, "--epochs", args.epochs)
+    _append_optional(command, "--incremental-epochs", args.incremental_epochs)
     _append_optional(command, "--device", args.device)
     _append_optional(command, "--threshold-quantile", args.threshold_quantile)
     _append_optional(command, "--variant", args.variant)

@@ -1,0 +1,4 @@
+rank,concept,avg_score,avg_rank,patchcore_score,padim_score,cfa_score,patchcore_rank,padim_rank,cfa_rank
+1,03,0.990264,2.67,0.999939,0.981890,0.988963,3,2,3
+2,01,0.967930,2.33,0.945578,0.987366,0.970845,2,3,2
+3,02,0.794722,1.00,0.792333,0.795500,0.796333,1,1,1
